@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find E:/AndroidStudioProjects/laninjecter/ -type f -name *.gradle.kts -o -name *.gradle)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "Bash(./gradlew :payload:compileJava)",
+      "Bash(./gradlew :payload:generatePayloadDex)",
+      "Bash(./gradlew :app:compileDebugKotlin)",
+      "Bash(./gradlew :app:assembleDebug)",
+      "Bash(cd:*)",
+      "Bash(mv app/src/main/java/com/baozi/laninjecter app/src/main/java/com/baozi/laninjector)",
+      "Bash(mv app/src/test/java/com/baozi/laninjecter app/src/test/java/com/baozi/laninjector)",
+      "Bash(mv app/src/androidTest/java/com/baozi/laninjecter app/src/androidTest/java/com/baozi/laninjector)",
+      "Bash(mv payload/src/main/java/com/baozi/laninjecter payload/src/main/java/com/baozi/laninjector)",
+      "Bash(while read:*)",
+      "Bash(do sed:*)",
+      "Bash(done)",
+      "Bash(./gradlew :payload:generatePayloadDex :app:assembleDebug)",
+      "Bash(./gradlew clean:*)"
+    ]
+  }
+}
