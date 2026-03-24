@@ -43,6 +43,7 @@ public class FloatingMenuManager {
     private State state = State.IDLE;
     private List<String> selectedLocales;
     private int currentIndex = 0;
+    private boolean pendingOverlayUpgrade = false;
 
     private static final int BALL_SIZE_DP = 56;
 
@@ -61,6 +62,25 @@ public class FloatingMenuManager {
         tracker.setOnActivityChangedListener(newActivity -> {
             handler.post(() -> reattachBall(newActivity));
         });
+
+        // Listen for ALL activity resumes to detect overlay permission grant
+        activity.getApplication().registerActivityLifecycleCallbacks(
+                new android.app.Application.ActivityLifecycleCallbacks() {
+            @Override
+            public void onActivityResumed(Activity a) {
+                if (pendingOverlayUpgrade && ballView != null) {
+                    pendingOverlayUpgrade = false;
+                    Log.d(TAG, "Overlay permission may have been granted, rebuilding ball");
+                    handler.post(() -> reattachBall(a));
+                }
+            }
+            @Override public void onActivityCreated(Activity a, android.os.Bundle b) {}
+            @Override public void onActivityStarted(Activity a) {}
+            @Override public void onActivityPaused(Activity a) {}
+            @Override public void onActivityStopped(Activity a) {}
+            @Override public void onActivitySaveInstanceState(Activity a, android.os.Bundle b) {}
+            @Override public void onActivityDestroyed(Activity a) {}
+        });
     }
 
     public void show() {
@@ -73,6 +93,7 @@ public class FloatingMenuManager {
         // Request overlay permission if not granted
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(activity)) {
             Log.d(TAG, "Overlay permission not granted, requesting...");
+            pendingOverlayUpgrade = true;
             try {
                 Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                         Uri.parse("package:" + activity.getPackageName()));
@@ -277,24 +298,36 @@ public class FloatingMenuManager {
     }
 
     private void addToWindowNow(Activity activity, View view, int width, int height, int x, int y) {
-        try {
-            if (view.getParent() != null) return;
+        if (view.getParent() != null) return;
 
-            // Check if we can use system overlay (above everything including Dialogs)
-            boolean canOverlay = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
-                    && Settings.canDrawOverlays(activity);
-
-            int windowType;
-            if (canOverlay) {
-                windowType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;
+        // Strategy 1: Try TYPE_APPLICATION_OVERLAY first (above Dialogs)
+        // Don't check canDrawOverlays() - MIUI and some ROMs return false even when granted
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                        width, height,
+                        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                                | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                                | WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                        PixelFormat.TRANSLUCENT
+                );
+                params.gravity = Gravity.TOP | Gravity.START;
+                params.x = x;
+                params.y = y;
+                activity.getWindowManager().addView(view, params);
                 Log.d(TAG, "Using TYPE_APPLICATION_OVERLAY (above Dialogs)");
-            } else {
-                windowType = WindowManager.LayoutParams.TYPE_APPLICATION_PANEL;
+                return;
+            } catch (Exception e) {
+                Log.d(TAG, "TYPE_APPLICATION_OVERLAY failed: " + e.getMessage());
             }
+        }
 
+        // Strategy 2: TYPE_APPLICATION_PANEL with activity token
+        try {
             WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                     width, height,
-                    windowType,
+                    WindowManager.LayoutParams.TYPE_APPLICATION_PANEL,
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                             | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                             | WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
@@ -303,23 +336,20 @@ public class FloatingMenuManager {
             params.gravity = Gravity.TOP | Gravity.START;
             params.x = x;
             params.y = y;
+            params.token = activity.getWindow().getDecorView().getWindowToken();
 
-            // TYPE_APPLICATION_OVERLAY doesn't need a token;
-            // TYPE_APPLICATION_PANEL needs the activity's window token
-            if (!canOverlay) {
-                params.token = activity.getWindow().getDecorView().getWindowToken();
-                if (params.token == null) {
-                    Log.w(TAG, "Window token still null, falling back to content view");
-                    addToContentView(activity, view, width, height, x, y);
-                    return;
-                }
+            if (params.token != null) {
+                activity.getWindowManager().addView(view, params);
+                Log.d(TAG, "Using TYPE_APPLICATION_PANEL");
+                return;
             }
-
-            activity.getWindowManager().addView(view, params);
         } catch (Exception e) {
-            Log.e(TAG, "Failed to add view to window, falling back", e);
-            addToContentView(activity, view, width, height, x, y);
+            Log.d(TAG, "TYPE_APPLICATION_PANEL failed: " + e.getMessage());
         }
+
+        // Strategy 3: Fallback to content view
+        Log.d(TAG, "Falling back to content view");
+        addToContentView(activity, view, width, height, x, y);
     }
 
     /** Fallback: add to Activity's content FrameLayout (won't show above Dialogs) */

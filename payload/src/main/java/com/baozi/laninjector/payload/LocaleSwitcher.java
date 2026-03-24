@@ -1,20 +1,28 @@
 package com.baozi.laninjector.payload;
 
 import android.app.Activity;
+import android.app.Application;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.LocaleList;
 import android.util.Log;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Locale;
 
 public class LocaleSwitcher {
 
     private static final String TAG = "LanInjector";
+    private static final String PREFS_NAME = "laninjector_locale";
+    private static final String KEY_LOCALE = "target_locale";
+
+    // Registered once to intercept every Activity creation
+    private static boolean overrideRegistered = false;
 
     @SuppressWarnings("deprecation")
     public static void switchLocale(Activity activity, String localeCode) {
@@ -23,7 +31,7 @@ public class LocaleSwitcher {
         String languageTag = localeCode.replace("-r", "-");
         Locale locale = LocaleUtils.parseLocaleQualifier(localeCode);
 
-        // Strategy 1: Android 13+ framework LocaleManager (not affected by obfuscation)
+        // Strategy 1: Android 13+ framework LocaleManager
         if (Build.VERSION.SDK_INT >= 33) {
             if (tryFrameworkLocaleManager(activity, languageTag)) {
                 Log.d(TAG, "Locale switched via framework LocaleManager: " + languageTag);
@@ -31,50 +39,154 @@ public class LocaleSwitcher {
             }
         }
 
-        // Strategy 2: Write AppCompat's internal SharedPreferences + updateConfiguration
-        tryWriteAppCompatLocalePrefs(activity, languageTag);
+        // Strategy 2: Locale.setDefault + updateConfiguration + onActivityCreated callback + recreate
+        // Do NOT write to AppCompat SharedPreferences — causes StringFrog decrypt crash on restart
+        saveTargetLocale(activity, languageTag);
+        registerLocaleOverride(activity.getApplication(), locale);
 
-        // Strategy 3: Try finding obfuscated AppCompatDelegate via Activity's getDelegate()
-        tryAppCompatDelegateViaActivity(activity, languageTag);
-
-        // Strategy 4: Manual updateConfiguration + recreate (always runs as final step)
+        // Apply to current process immediately
         Locale.setDefault(locale);
-
-        Resources resources = activity.getResources();
-        Configuration config = new Configuration(resources.getConfiguration());
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            config.setLocales(new LocaleList(locale));
-            activity.getApplicationContext().getResources()
-                    .updateConfiguration(config, resources.getDisplayMetrics());
-        }
-
-        config.setLocale(locale);
-        resources.updateConfiguration(config, resources.getDisplayMetrics());
-
-        Resources appResources = activity.getApplicationContext().getResources();
-        Configuration appConfig = new Configuration(appResources.getConfiguration());
-        appConfig.setLocale(locale);
-        appResources.updateConfiguration(appConfig, appResources.getDisplayMetrics());
+        forceUpdateResources(activity, locale);
+        forceUpdateResources(activity.getApplicationContext(), locale);
 
         Log.d(TAG, "Locale set to " + locale + ", calling recreate()");
         activity.recreate();
     }
 
+
+
     /**
-     * Android 13+ (API 33): Use framework LocaleManager directly.
-     * Not affected by code obfuscation since it's a system API.
+     * Register a one-time ActivityLifecycleCallbacks that overrides the locale
+     * on EVERY Activity creation, BEFORE the app's own onCreate/setContentView.
      */
+    private static void registerLocaleOverride(Application app, Locale locale) {
+        if (overrideRegistered) return;
+        overrideRegistered = true;
+
+        if (Build.VERSION.SDK_INT >= 29) {
+            // API 29+: onActivityPreCreated fires BEFORE onCreate
+            app.registerActivityLifecycleCallbacks(new Application.ActivityLifecycleCallbacks() {
+                @Override
+                public void onActivityPreCreated(Activity activity, Bundle savedInstanceState) {
+                    Locale target = getTargetLocale(activity);
+                    if (target != null) {
+                        Locale.setDefault(target);
+                        forceUpdateResources(activity, target);
+                        forceUpdateResources(activity.getApplicationContext(), target);
+                        Log.d(TAG, "PreCreated locale override: " + target + " on " + activity.getClass().getSimpleName());
+                    }
+                }
+                @Override public void onActivityCreated(Activity a, Bundle b) {}
+                @Override public void onActivityStarted(Activity a) {}
+                @Override public void onActivityResumed(Activity a) {}
+                @Override public void onActivityPaused(Activity a) {}
+                @Override public void onActivityStopped(Activity a) {}
+                @Override public void onActivitySaveInstanceState(Activity a, Bundle b) {}
+                @Override public void onActivityDestroyed(Activity a) {}
+            });
+            Log.d(TAG, "Registered onActivityPreCreated locale override (API 29+)");
+        } else {
+            // API < 29: Use onActivityCreated (after onCreate, less ideal but still useful)
+            // Also try reflection to modify base context
+            app.registerActivityLifecycleCallbacks(new Application.ActivityLifecycleCallbacks() {
+                @Override
+                public void onActivityCreated(Activity activity, Bundle savedInstanceState) {
+                    Locale target = getTargetLocale(activity);
+                    if (target != null) {
+                        Locale.setDefault(target);
+                        forceUpdateResources(activity, target);
+                        forceUpdateResources(activity.getApplicationContext(), target);
+                        tryOverrideBaseContext(activity, target);
+                        Log.d(TAG, "Created locale override: " + target + " on " + activity.getClass().getSimpleName());
+                    }
+                }
+                @Override public void onActivityStarted(Activity a) {}
+                @Override public void onActivityResumed(Activity a) {}
+                @Override public void onActivityPaused(Activity a) {}
+                @Override public void onActivityStopped(Activity a) {}
+                @Override public void onActivitySaveInstanceState(Activity a, Bundle b) {}
+                @Override public void onActivityDestroyed(Activity a) {}
+            });
+            Log.d(TAG, "Registered onActivityCreated locale override (API < 29)");
+        }
+    }
+
+    /** Save the target locale so it persists across Activity recreations */
+    private static void saveTargetLocale(Context context, String languageTag) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().putString(KEY_LOCALE, languageTag).apply();
+    }
+
+    /** Read the saved target locale */
+    private static Locale getTargetLocale(Context context) {
+        String tag = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(KEY_LOCALE, null);
+        if (tag == null || tag.isEmpty()) return null;
+        return Locale.forLanguageTag(tag);
+    }
+
+    @SuppressWarnings("deprecation")
+    private static void forceUpdateResources(Context context, Locale locale) {
+        try {
+            Resources resources = context.getResources();
+            Configuration config = new Configuration(resources.getConfiguration());
+            config.setLocale(locale);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                config.setLocales(new LocaleList(locale));
+            }
+            resources.updateConfiguration(config, resources.getDisplayMetrics());
+        } catch (Exception e) {
+            Log.d(TAG, "forceUpdateResources failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * On API < 29, try reflection to modify the Activity's base context configuration.
+     * This counters the app's own attachBaseContext locale override.
+     */
+    private static void tryOverrideBaseContext(Activity activity, Locale locale) {
+        try {
+            // Get ContextWrapper.mBase (the base context)
+            Field mBase = findField(activity.getClass(), "mBase");
+            if (mBase == null) return;
+            mBase.setAccessible(true);
+            Object baseContext = mBase.get(activity);
+            if (baseContext == null) return;
+
+            // Update the base context's resources configuration
+            Resources baseResources = ((Context) baseContext).getResources();
+            Configuration config = new Configuration(baseResources.getConfiguration());
+            config.setLocale(locale);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                config.setLocales(new LocaleList(locale));
+            }
+            baseResources.updateConfiguration(config, baseResources.getDisplayMetrics());
+            Log.d(TAG, "Base context locale overridden via reflection");
+        } catch (Exception e) {
+            Log.d(TAG, "Base context override failed: " + e.getMessage());
+        }
+    }
+
+    private static Field findField(Class<?> clazz, String name) {
+        while (clazz != null && clazz != Object.class) {
+            try {
+                return clazz.getDeclaredField(name);
+            } catch (NoSuchFieldException e) {
+                clazz = clazz.getSuperclass();
+            }
+        }
+        return null;
+    }
+
+    // ===== Strategy implementations =====
+
     private static boolean tryFrameworkLocaleManager(Activity activity, String languageTag) {
         try {
             Object localeManager = activity.getSystemService(
                     (Class<?>) Class.forName("android.app.LocaleManager"));
             if (localeManager == null) return false;
 
-            // LocaleList.forLanguageTags(languageTag)
             LocaleList localeList = LocaleList.forLanguageTags(languageTag);
-
-            // localeManager.setApplicationLocales(localeList)
             Method setLocales = localeManager.getClass().getMethod(
                     "setApplicationLocales", LocaleList.class);
             setLocales.invoke(localeManager, localeList);
@@ -83,123 +195,6 @@ public class LocaleSwitcher {
             return true;
         } catch (Exception e) {
             Log.d(TAG, "Framework LocaleManager failed: " + e.getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Write locale to AppCompat's internal SharedPreferences.
-     * Scans shared_prefs directory to find actual locale preference files,
-     * plus writes to known AppCompat preference names.
-     */
-    private static void tryWriteAppCompatLocalePrefs(Context context, String languageTag) {
-        try {
-            // Known AppCompat preference file/key combinations across versions
-            String[] knownPrefNames = {
-                    "androidx.appcompat.app.AppCompatDelegate",
-                    "AppCompatDelegate.locales",
-                    "app_compat_locales",
-                    "_app_locales_prefs",
-            };
-            String[] knownKeys = {
-                    "app_locales",
-                    "app_locale",
-                    "locales",
-                    "app_locales_key",
-            };
-
-            // Write to all known locations
-            for (String prefName : knownPrefNames) {
-                SharedPreferences prefs = context.getSharedPreferences(prefName, Context.MODE_PRIVATE);
-                SharedPreferences.Editor editor = prefs.edit();
-                for (String key : knownKeys) {
-                    editor.putString(key, languageTag);
-                }
-                editor.apply();
-            }
-            Log.d(TAG, "Wrote known AppCompat locale prefs: " + languageTag);
-
-            // Scan shared_prefs directory for locale-related files and keys
-            java.io.File prefsDir = new java.io.File(context.getApplicationInfo().dataDir, "shared_prefs");
-            if (prefsDir.exists() && prefsDir.isDirectory()) {
-                java.io.File[] files = prefsDir.listFiles();
-                if (files != null) {
-                    for (java.io.File file : files) {
-                        String fileName = file.getName();
-                        if (!fileName.endsWith(".xml")) continue;
-
-                        String prefName = fileName.replace(".xml", "");
-                        // Check if this prefs file contains locale-related keys
-                        SharedPreferences prefs = context.getSharedPreferences(prefName, Context.MODE_PRIVATE);
-                        java.util.Map<String, ?> allEntries = prefs.getAll();
-
-                        for (java.util.Map.Entry<String, ?> entry : allEntries.entrySet()) {
-                            String key = entry.getKey().toLowerCase();
-                            if (key.contains("locale") || key.contains("language") || key.contains("lang")) {
-                                Object value = entry.getValue();
-                                if (value instanceof String) {
-                                    String oldVal = (String) value;
-                                    Log.d(TAG, "Found locale pref: " + prefName + "/" + entry.getKey() + " = " + oldVal);
-                                    prefs.edit().putString(entry.getKey(), languageTag).apply();
-                                    Log.d(TAG, "Updated to: " + languageTag);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            Log.d(TAG, "Write AppCompat prefs failed: " + e.getMessage());
-        }
-    }
-
-    /**
-     * Try to call setApplicationLocales via Activity.getDelegate() to find the
-     * potentially obfuscated AppCompatDelegate class at runtime.
-     */
-    private static boolean tryAppCompatDelegateViaActivity(Activity activity, String languageTag) {
-        try {
-            // AppCompatActivity.getDelegate() returns AppCompatDelegate instance
-            Method getDelegate = activity.getClass().getMethod("getDelegate");
-            Object delegate = getDelegate.invoke(activity);
-            if (delegate == null) return false;
-
-            // Get the actual (possibly obfuscated) AppCompatDelegate class
-            Class<?> delegateClass = delegate.getClass();
-            // Walk up to find the class that has setApplicationLocales
-            Class<?> current = delegateClass;
-            Method setLocalesMethod = null;
-
-            while (current != null && current != Object.class) {
-                for (Method m : current.getDeclaredMethods()) {
-                    // Look for a static method that takes one parameter and the parameter
-                    // type name contains "Locale" or "List"
-                    if (java.lang.reflect.Modifier.isStatic(m.getModifiers())
-                            && m.getParameterTypes().length == 1
-                            && m.getName().equals("setApplicationLocales")) {
-                        setLocalesMethod = m;
-                        break;
-                    }
-                }
-                if (setLocalesMethod != null) break;
-                current = current.getSuperclass();
-            }
-
-            if (setLocalesMethod != null) {
-                // Found the method, now we need to create the LocaleListCompat parameter
-                Class<?> paramType = setLocalesMethod.getParameterTypes()[0];
-                // Try to find forLanguageTags on the parameter type
-                Method forTags = paramType.getMethod("forLanguageTags", String.class);
-                Object localeList = forTags.invoke(null, languageTag);
-                setLocalesMethod.invoke(null, localeList);
-                Log.d(TAG, "AppCompat delegate locale switch succeeded: " + languageTag);
-                return true;
-            }
-
-            Log.d(TAG, "setApplicationLocales not found on delegate class hierarchy");
-            return false;
-        } catch (Exception e) {
-            Log.d(TAG, "AppCompat delegate approach failed: " + e.getMessage());
             return false;
         }
     }
