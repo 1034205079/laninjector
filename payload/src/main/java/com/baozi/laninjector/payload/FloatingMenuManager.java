@@ -295,17 +295,18 @@ public class FloatingMenuManager {
         if (stopButton != null && stopButton.getParent() != null) return;
 
         stopButton = new FloatingBallView(activity);
-        stopButton.setDisplayText("Stop");
+        stopButton.setDisplayText("X");
         stopButton.setShowArrow(false);
-        stopButton.setBallColor(0xFFF44336);
+        stopButton.setBallColor(0xAAF44336);
         stopButton.setClickCallback(() -> {
             hideStopButton();
             resetToIdle();
         });
 
-        int size = dpToPx(activity, 40);
-        int stopX = ballX + dpToPx(activity, BALL_WIDTH_DP) + dpToPx(activity, 8);
-        int stopY = ballY + dpToPx(activity, 8);
+        // Small circle at top-right corner of the ball
+        int size = dpToPx(activity, 22);
+        int stopX = ballX + dpToPx(activity, BALL_WIDTH_DP) - size / 2;
+        int stopY = ballY - size / 2;
         addToWindow(activity, stopButton, size, size, stopX, stopY);
     }
 

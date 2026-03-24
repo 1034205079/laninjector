@@ -31,16 +31,16 @@ public class LocaleSwitcher {
         String languageTag = localeCode.replace("-r", "-");
         Locale locale = LocaleUtils.parseLocaleQualifier(localeCode);
 
-        // Strategy 1: Android 13+ framework LocaleManager
+        // Strategy 1: Android 13+ framework LocaleManager (helps apps that respect system locale)
         if (Build.VERSION.SDK_INT >= 33) {
             if (tryFrameworkLocaleManager(activity, languageTag)) {
-                Log.d(TAG, "Locale switched via framework LocaleManager: " + languageTag);
-                return;
+                Log.d(TAG, "LocaleManager set: " + languageTag);
             }
+            // Don't return — also apply Strategy 2 for apps that ignore LocaleManager
         }
 
-        // Strategy 2: Locale.setDefault + updateConfiguration + onActivityCreated callback + recreate
-        // Do NOT write to AppCompat SharedPreferences — causes StringFrog decrypt crash on restart
+        // Strategy 2: Direct Resources override + lifecycle callback + recreate
+        // Works for apps with their own language management that ignores LocaleManager
         saveTargetLocale(activity, languageTag);
         registerLocaleOverride(activity.getApplication(), locale);
 
