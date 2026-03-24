@@ -2,6 +2,8 @@ package com.baozi.laninjector.payload;
 
 import android.app.Activity;
 import android.app.Application;
+import android.content.Context;
+import android.os.Bundle;
 import android.util.Log;
 
 import java.io.BufferedReader;
@@ -17,15 +19,15 @@ public class PayloadInit {
     private static boolean initialized = false;
 
     /**
-     * Entry point called from injected code. Takes only Activity (no extra registers needed).
-     * Reads locale list from assets/laninjector_locales.txt at runtime.
+     * Entry point called from PayloadProvider (ContentProvider).
+     * No Activity available yet — registers callbacks and waits for first Activity.
      */
-    public static void init(Activity activity) {
-        Log.d(TAG, "PayloadInit.init() called, initialized=" + initialized);
+    public static void initFromProvider(Context context) {
+        Log.d(TAG, "PayloadInit.initFromProvider() called, initialized=" + initialized);
         if (initialized) return;
         initialized = true;
 
-        String[] locales = loadLocales(activity);
+        final String[] locales = loadLocales(context);
         if (locales == null || locales.length == 0) {
             Log.w(TAG, "No locales found in " + LOCALES_FILE);
             return;
@@ -33,21 +35,43 @@ public class PayloadInit {
 
         Log.d(TAG, "Loaded " + locales.length + " locales from " + LOCALES_FILE);
 
-        Application app = activity.getApplication();
-        ActivityTracker tracker = new ActivityTracker();
+        final Application app = (Application) context.getApplicationContext();
+        final ActivityTracker tracker = new ActivityTracker();
         app.registerActivityLifecycleCallbacks(tracker);
-        Log.d(TAG, "ActivityTracker registered");
+        Log.d(TAG, "ActivityTracker registered, waiting for first Activity...");
 
-        tracker.onActivityResumed(activity);
+        // Use a separate lifecycle callback to detect first Activity resume,
+        // then create FloatingMenuManager (which sets its own listener on tracker)
+        app.registerActivityLifecycleCallbacks(new Application.ActivityLifecycleCallbacks() {
+            private boolean ballCreated = false;
 
-        FloatingMenuManager manager = new FloatingMenuManager(activity, locales, tracker);
-        manager.show();
-        Log.d(TAG, "FloatingMenuManager shown");
+            @Override
+            public void onActivityResumed(Activity activity) {
+                if (!ballCreated) {
+                    ballCreated = true;
+                    // Seed the tracker with the first activity
+                    tracker.onActivityResumed(activity);
+                    Log.d(TAG, "First Activity resumed: " + activity.getClass().getSimpleName());
+                    FloatingMenuManager manager = new FloatingMenuManager(activity, locales, tracker);
+                    manager.show();
+                    Log.d(TAG, "FloatingMenuManager shown");
+                    // Unregister this one-shot callback
+                    app.unregisterActivityLifecycleCallbacks(this);
+                }
+            }
+
+            @Override public void onActivityCreated(Activity a, Bundle b) {}
+            @Override public void onActivityStarted(Activity a) {}
+            @Override public void onActivityPaused(Activity a) {}
+            @Override public void onActivityStopped(Activity a) {}
+            @Override public void onActivitySaveInstanceState(Activity a, Bundle b) {}
+            @Override public void onActivityDestroyed(Activity a) {}
+        });
     }
 
-    private static String[] loadLocales(Activity activity) {
+    private static String[] loadLocales(Context context) {
         try {
-            InputStream is = activity.getAssets().open(LOCALES_FILE);
+            InputStream is = context.getAssets().open(LOCALES_FILE);
             BufferedReader reader = new BufferedReader(new InputStreamReader(is, "UTF-8"));
             List<String> locales = new ArrayList<>();
             String line;

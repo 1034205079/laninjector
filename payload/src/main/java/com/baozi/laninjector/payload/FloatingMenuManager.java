@@ -1,7 +1,7 @@
 package com.baozi.laninjector.payload;
 
 import android.app.Activity;
-import android.app.Application;
+import android.graphics.PixelFormat;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.DisplayMetrics;
@@ -9,12 +9,13 @@ import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.FrameLayout;
+import android.view.WindowManager;
 
 import java.util.List;
 
 /**
- * Manages the floating language menu using the Activity's own window (DecorView).
+ * Manages the floating language menu using WindowManager.
+ * Uses TYPE_APPLICATION_PANEL to display above Dialogs.
  * No SYSTEM_ALERT_WINDOW permission needed.
  */
 public class FloatingMenuManager {
@@ -24,8 +25,7 @@ public class FloatingMenuManager {
     private enum State {
         IDLE,
         PANEL_OPEN,
-        CYCLING,
-        DONE
+        CYCLING
     }
 
     private final String[] locales;
@@ -65,15 +65,12 @@ public class FloatingMenuManager {
             Log.w(TAG, "No current activity, cannot show ball");
             return;
         }
-        Log.d(TAG, "Showing floating ball (no overlay permission needed)");
+        Log.d(TAG, "Showing floating ball (WindowManager panel)");
         showBall(activity);
     }
 
     private void showBall(Activity activity) {
         if (ballView != null && ballView.getParent() != null) return;
-
-        FrameLayout decorContent = getDecorContent(activity);
-        if (decorContent == null) return;
 
         int ballSize = dpToPx(activity, BALL_SIZE_DP);
 
@@ -81,50 +78,60 @@ public class FloatingMenuManager {
         ballView.setDisplayText("L");
         ballView.setClickCallback(this::onBallClicked);
 
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(ballSize, ballSize);
-        lp.gravity = Gravity.TOP | Gravity.START;
-        lp.leftMargin = ballX;
-        lp.topMargin = ballY;
-
         ballView.setDragListener((dx, dy) -> {
             ballX += (int) dx;
             ballY += (int) dy;
-            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) ballView.getLayoutParams();
-            params.leftMargin = ballX;
-            params.topMargin = ballY;
-            ballView.setLayoutParams(params);
+            updateViewPosition(ballView, ballX, ballY);
         });
 
-        decorContent.addView(ballView, lp);
+        addToWindow(activity, ballView, ballSize, ballSize, ballX, ballY);
         Log.d(TAG, "Ball attached to activity: " + activity.getClass().getSimpleName());
     }
 
     private void reattachBall(Activity activity) {
-        if (ballView == null) return;
+        reattachBall(activity, 0);
+    }
 
-        // Remove from old parent
-        ViewGroup oldParent = (ViewGroup) ballView.getParent();
-        if (oldParent != null) oldParent.removeView(ballView);
-        if (panelView != null && panelView.getParent() != null) {
-            ((ViewGroup) panelView.getParent()).removeView(panelView);
-        }
-        if (stopButton != null && stopButton.getParent() != null) {
-            ((ViewGroup) stopButton.getParent()).removeView(stopButton);
+    private void reattachBall(Activity activity, int retryCount) {
+        // Remove old views
+        removeFromWindow(ballView);
+        removeFromWindow(panelView);
+        panelView = null;
+        removeFromWindow(stopButton);
+        stopButton = null;
+
+        // Check if window is ready
+        try {
+            activity.getWindow().getDecorView().getWindowToken();
+        } catch (Exception e) {
+            if (retryCount < 3) {
+                Log.d(TAG, "Window not ready, retry " + (retryCount + 1));
+                handler.postDelayed(() -> reattachBall(activity, retryCount + 1), 200);
+            } else {
+                Log.w(TAG, "Failed to reattach ball after retries");
+            }
+            return;
         }
 
-        // Re-add to new activity
-        FrameLayout decorContent = getDecorContent(activity);
-        if (decorContent == null) return;
+        // Recreate ball with new activity context
+        String currentText = ballView != null ? ballView.getDisplayText() : "L";
+        int currentColor = ballView != null ? ballView.getBallColor() : 0xFF6200EE;
 
         int ballSize = dpToPx(activity, BALL_SIZE_DP);
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(ballSize, ballSize);
-        lp.gravity = Gravity.TOP | Gravity.START;
-        lp.leftMargin = ballX;
-        lp.topMargin = ballY;
-        decorContent.addView(ballView, lp);
+        ballView = new FloatingBallView(activity);
+        ballView.setDisplayText(currentText);
+        ballView.setBallColor(currentColor);
+        ballView.setClickCallback(this::onBallClicked);
+        ballView.setDragListener((dx, dy) -> {
+            ballX += (int) dx;
+            ballY += (int) dy;
+            updateViewPosition(ballView, ballX, ballY);
+        });
+
+        addToWindow(activity, ballView, ballSize, ballSize, ballX, ballY);
 
         // Re-add stop button if cycling
-        if (state == State.CYCLING && stopButton != null) {
+        if (state == State.CYCLING) {
             showStopButton();
         }
 
@@ -140,9 +147,6 @@ public class FloatingMenuManager {
             case CYCLING:
                 switchToNext();
                 break;
-            case DONE:
-                resetToIdle();
-                break;
             default:
                 break;
         }
@@ -154,9 +158,6 @@ public class FloatingMenuManager {
         Log.d(TAG, "Showing language panel");
         state = State.PANEL_OPEN;
 
-        FrameLayout decorContent = getDecorContent(activity);
-        if (decorContent == null) return;
-
         panelView = new LanguagePanelView(activity, locales);
         panelView.setStartCallback(selected -> {
             hidePanel();
@@ -167,9 +168,10 @@ public class FloatingMenuManager {
         int panelWidth = Math.min(dpToPx(activity, 300), dm.widthPixels - dpToPx(activity, 32));
         int panelHeight = Math.min(dpToPx(activity, 400), dm.heightPixels - dpToPx(activity, 100));
 
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(panelWidth, panelHeight);
-        lp.gravity = Gravity.CENTER;
-        decorContent.addView(panelView, lp);
+        // Center the panel
+        int panelX = (dm.widthPixels - panelWidth) / 2;
+        int panelY = (dm.heightPixels - panelHeight) / 2;
+        addToWindow(activity, panelView, panelWidth, panelHeight, panelX, panelY);
 
         ballView.setDisplayText("X");
         ballView.setClickCallback(() -> {
@@ -179,10 +181,8 @@ public class FloatingMenuManager {
     }
 
     private void hidePanel() {
-        if (panelView != null && panelView.getParent() != null) {
-            ((ViewGroup) panelView.getParent()).removeView(panelView);
-            panelView = null;
-        }
+        removeFromWindow(panelView);
+        panelView = null;
     }
 
     private void startCycling(List<String> selected) {
@@ -194,16 +194,11 @@ public class FloatingMenuManager {
     }
 
     private void switchToCurrentLocale() {
-        if (currentIndex >= selectedLocales.size()) {
-            onCyclingDone();
-            return;
-        }
-
         String locale = selectedLocales.get(currentIndex);
         Log.d(TAG, "Switching to locale: " + locale + " (" + (currentIndex + 1) + "/" + selectedLocales.size() + ")");
 
-        String progress = (currentIndex + 1) + "/" + selectedLocales.size();
-        ballView.setDisplayText(progress);
+        String displayName = LocaleUtils.formatForDisplay(locale);
+        ballView.setDisplayText(displayName);
         ballView.setBallColor(0xFF03DAC5);
         ballView.setClickCallback(this::onBallClicked);
 
@@ -212,27 +207,12 @@ public class FloatingMenuManager {
         Activity activity = activityTracker.getCurrentActivity();
         if (activity != null) {
             LocaleSwitcher.switchLocale(activity, locale);
-            // After recreate, ball will be reattached via listener
         }
     }
 
     private void switchToNext() {
-        currentIndex++;
-        if (currentIndex >= selectedLocales.size()) {
-            onCyclingDone();
-        } else {
-            switchToCurrentLocale();
-        }
-    }
-
-    private void onCyclingDone() {
-        Log.d(TAG, "Cycling done");
-        state = State.DONE;
-        hideStopButton();
-        ballView.setDisplayText("OK");
-        ballView.setBallColor(0xFF4CAF50);
-        ballView.setClickCallback(this::onBallClicked);
-        handler.postDelayed(this::resetToIdle, 2000);
+        currentIndex = (currentIndex + 1) % selectedLocales.size();
+        switchToCurrentLocale();
     }
 
     private void resetToIdle() {
@@ -249,9 +229,6 @@ public class FloatingMenuManager {
         if (activity == null) return;
         if (stopButton != null && stopButton.getParent() != null) return;
 
-        FrameLayout decorContent = getDecorContent(activity);
-        if (decorContent == null) return;
-
         stopButton = new FloatingBallView(activity);
         stopButton.setDisplayText("Stop");
         stopButton.setBallColor(0xFFF44336);
@@ -261,33 +238,101 @@ public class FloatingMenuManager {
         });
 
         int size = dpToPx(activity, 40);
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(size, size);
-        lp.gravity = Gravity.TOP | Gravity.START;
-        lp.leftMargin = ballX + dpToPx(activity, BALL_SIZE_DP) + dpToPx(activity, 8);
-        lp.topMargin = ballY + dpToPx(activity, 8);
-        decorContent.addView(stopButton, lp);
+        int stopX = ballX + dpToPx(activity, BALL_SIZE_DP) + dpToPx(activity, 8);
+        int stopY = ballY + dpToPx(activity, 8);
+        addToWindow(activity, stopButton, size, size, stopX, stopY);
     }
 
     private void hideStopButton() {
-        if (stopButton != null && stopButton.getParent() != null) {
-            ((ViewGroup) stopButton.getParent()).removeView(stopButton);
-            stopButton = null;
+        removeFromWindow(stopButton);
+        stopButton = null;
+    }
+
+    // ===== WindowManager helpers =====
+
+    private void addToWindow(Activity activity, View view, int width, int height, int x, int y) {
+        // DecorView may not have a window token yet during onActivityResumed,
+        // so post to ensure the window is fully attached first
+        View decorView = activity.getWindow().getDecorView();
+        decorView.post(() -> addToWindowNow(activity, view, width, height, x, y));
+    }
+
+    private void addToWindowNow(Activity activity, View view, int width, int height, int x, int y) {
+        try {
+            if (view.getParent() != null) return;
+
+            WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                    width, height,
+                    WindowManager.LayoutParams.TYPE_APPLICATION_PANEL,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                            | WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                    PixelFormat.TRANSLUCENT
+            );
+            params.gravity = Gravity.TOP | Gravity.START;
+            params.x = x;
+            params.y = y;
+            params.token = activity.getWindow().getDecorView().getWindowToken();
+
+            if (params.token == null) {
+                Log.w(TAG, "Window token still null, falling back to content view");
+                addToContentView(activity, view, width, height, x, y);
+                return;
+            }
+
+            activity.getWindowManager().addView(view, params);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to add view to window, falling back", e);
+            addToContentView(activity, view, width, height, x, y);
         }
     }
 
-    private FrameLayout getDecorContent(Activity activity) {
+    /** Fallback: add to Activity's content FrameLayout (won't show above Dialogs) */
+    private void addToContentView(Activity activity, View view, int width, int height, int x, int y) {
         try {
-            View decorView = activity.getWindow().getDecorView();
-            // android.R.id.content's parent is a FrameLayout
-            return (FrameLayout) decorView.findViewById(android.R.id.content).getParent();
+            if (view.getParent() != null) return;
+            android.widget.FrameLayout content =
+                    (android.widget.FrameLayout) activity.findViewById(android.R.id.content);
+            if (content == null) return;
+
+            android.widget.FrameLayout.LayoutParams lp =
+                    new android.widget.FrameLayout.LayoutParams(width, height);
+            lp.gravity = Gravity.TOP | Gravity.START;
+            lp.leftMargin = x;
+            lp.topMargin = y;
+            content.addView(view, lp);
         } catch (Exception e) {
-            Log.e(TAG, "Cannot get DecorView content", e);
-            // Fallback: try to cast decorView itself
-            try {
-                return (FrameLayout) activity.getWindow().getDecorView();
-            } catch (Exception e2) {
-                return null;
+            Log.e(TAG, "Fallback addToContentView also failed", e);
+        }
+    }
+
+    private void updateViewPosition(View view, int x, int y) {
+        if (view == null || view.getParent() == null) return;
+        try {
+            WindowManager.LayoutParams params = (WindowManager.LayoutParams) view.getLayoutParams();
+            params.x = x;
+            params.y = y;
+            Activity activity = activityTracker.getCurrentActivity();
+            if (activity != null) {
+                activity.getWindowManager().updateViewLayout(view, params);
             }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to update view position", e);
+        }
+    }
+
+    private void removeFromWindow(View view) {
+        if (view == null || view.getParent() == null) return;
+        try {
+            Activity activity = activityTracker.getCurrentActivity();
+            if (activity != null) {
+                activity.getWindowManager().removeView(view);
+            } else {
+                // Fallback: remove from parent directly
+                ((ViewGroup) view.getParent()).removeView(view);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to remove view from window", e);
         }
     }
 

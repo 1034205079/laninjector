@@ -5,6 +5,7 @@ import android.net.Uri
 import android.util.Log
 import com.baozi.laninjector.model.ApkInfo
 import com.baozi.laninjector.model.InjectionState
+import android.provider.OpenableColumns
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -23,7 +24,6 @@ class InjectionPipeline(private val context: Context) {
 
     private val analyzer = ApkAnalyzer(context)
     private val manifestPatcher = ManifestPatcher()
-    private val dexInjector = DexInjector(context)
     private val rebuilder = ApkRebuilder()
     private val zipAligner = ZipAligner()
     private val keyStoreManager = KeyStoreManager(context)
@@ -36,6 +36,9 @@ class InjectionPipeline(private val context: Context) {
         val tempDir = File(context.cacheDir, "apk_temp")
         tempDir.mkdirs()
         val tempApk = File(tempDir, "original.apk")
+
+        // Resolve original filename from URI
+        val originalFileName = resolveFileName(apkUri)
 
         try {
             // Step 0: Copy APK to temp file for random access
@@ -69,26 +72,19 @@ class InjectionPipeline(private val context: Context) {
             requireNotNull(manifestData) { "AndroidManifest.xml not found" }
             require(apkInfo.locales.isNotEmpty()) { "No locale resources found in APK" }
 
-            // Step 3: Patch manifest
+            // Step 3: Patch manifest (add provider declaration)
             Log.d(TAG, "Step 3: Patching manifest")
             _state.value = InjectionState.PatchingManifest()
-            val patchedManifest = manifestPatcher.patchManifest(manifestData)
+            val patchedManifest = manifestPatcher.patchManifest(manifestData, apkInfo.packageName)
             Log.d(TAG, "Manifest patched: ${manifestData.size} -> ${patchedManifest.size} bytes")
 
-            // Step 4: Inject DEX (reads from temp APK file directly, one DEX at a time)
-            Log.d(TAG, "Step 4: Injecting DEX code")
+            // Step 4: Add payload DEX
+            Log.d(TAG, "Step 4: Adding payload DEX")
             _state.value = InjectionState.InjectingDex()
-            val dexResult = dexInjector.inject(tempApk, apkInfo.launcherActivity, apkInfo.locales, apkInfo.dexCount)
-            Log.d(TAG, "DEX injected: modifiedDexIndex=${dexResult.modifiedDexIndex}, payloadSize=${dexResult.payloadDexBytes.size}")
-
-            val modifiedDexFiles = mutableMapOf<String, ByteArray>()
-            val dexName = if (dexResult.modifiedDexIndex == 0) "classes.dex"
-            else "classes${dexResult.modifiedDexIndex + 1}.dex"
-            modifiedDexFiles[dexName] = dexResult.modifiedDexBytes
-
+            val payloadDex = context.assets.open("payload.dex").readBytes()
             val payloadDexName = "classes${apkInfo.dexCount + 1}.dex"
-            val additionalDexFiles = mapOf(payloadDexName to dexResult.payloadDexBytes)
-            Log.d(TAG, "Modified DEX: $dexName, Payload DEX: $payloadDexName")
+            val additionalDexFiles = mapOf(payloadDexName to payloadDex)
+            Log.d(TAG, "Payload DEX: $payloadDexName (${payloadDex.size} bytes)")
 
             // Step 5: Rebuild APK
             Log.d(TAG, "Step 5: Rebuilding APK")
@@ -97,7 +93,7 @@ class InjectionPipeline(private val context: Context) {
             val unsignedApk = File(tempDir, "unsigned.apk")
             val signedApk = File(
                 context.getExternalFilesDir("output"),
-                "injected_${System.currentTimeMillis()}.apk"
+                "inject_$originalFileName"
             )
 
             // Generate locales asset file
@@ -108,7 +104,7 @@ class InjectionPipeline(private val context: Context) {
                 originalApkFile = tempApk,
                 outputFile = unsignedApk,
                 modifiedManifest = patchedManifest,
-                modifiedDexFiles = modifiedDexFiles,
+                modifiedDexFiles = emptyMap(),
                 additionalDexFiles = additionalDexFiles,
                 additionalAssets = additionalAssets
             )
@@ -158,5 +154,21 @@ class InjectionPipeline(private val context: Context) {
     fun reset() {
         _state.value = InjectionState.Idle
         lastApkInfo = null
+    }
+
+    private fun resolveFileName(uri: Uri): String {
+        // Try content resolver query first
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (nameIndex >= 0) {
+                    val name = cursor.getString(nameIndex)
+                    if (!name.isNullOrBlank()) return name
+                }
+            }
+        }
+        // Fallback: extract from URI path
+        val path = uri.lastPathSegment ?: return "unknown.apk"
+        return path.substringAfterLast('/')
     }
 }

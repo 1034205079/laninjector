@@ -70,10 +70,18 @@ public class FloatingBallView extends View {
         invalidate();
     }
 
+    public String getDisplayText() {
+        return displayText;
+    }
+
     public void setBallColor(int color) {
         this.ballColor = color;
         bgPaint.setColor(color);
         invalidate();
+    }
+
+    public int getBallColor() {
+        return ballColor;
     }
 
     @Override
