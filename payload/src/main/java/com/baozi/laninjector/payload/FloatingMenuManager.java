@@ -186,8 +186,9 @@ public class FloatingMenuManager {
         int panelWidth = Math.min(dpToPx(activity, 300), dm.widthPixels - dpToPx(activity, 32));
         int panelHeight = Math.min(dpToPx(activity, 400), dm.heightPixels - dpToPx(activity, 100));
 
-        // Center the panel
-        int panelX = (dm.widthPixels - panelWidth) / 2;
+        // Position panel to the right of the ball so it doesn't cover the X button
+        int ballRight = ballX + dpToPx(activity, BALL_SIZE_DP) + dpToPx(activity, 8);
+        int panelX = Math.min(ballRight, dm.widthPixels - panelWidth - dpToPx(activity, 8));
         int panelY = (dm.heightPixels - panelHeight) / 2;
         addToWindow(activity, panelView, panelWidth, panelHeight, panelX, panelY);
 
