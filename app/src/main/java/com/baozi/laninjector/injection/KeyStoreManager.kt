@@ -2,6 +2,7 @@ package com.baozi.laninjector.injection
 
 import android.content.Context
 import android.util.Log
+import com.baozi.laninjector.model.SigningConfig
 import java.io.File
 import java.io.FileOutputStream
 import java.math.BigInteger
@@ -27,7 +28,18 @@ class KeyStoreManager(private val context: Context) {
         val certificate: X509Certificate
     )
 
-    fun getSigningKey(): SigningKey {
+    fun getSigningKey(config: SigningConfig = SigningConfig()): SigningKey {
+        Log.d(TAG, "KeyStoreManager: useCustom=${config.useCustom}, selectedId=${config.selectedId}, entries=${config.entries.size}")
+        val entry = if (config.useCustom) config.selectedEntry else null
+        if (entry != null && !entry.keystorePath.isNullOrEmpty()) {
+            Log.d(TAG, "KeyStoreManager: using custom keystore '${entry.name}', path=${entry.keystorePath}, alias=${entry.keyAlias}")
+            return loadCustomKey(entry)
+        }
+
+        if (config.useCustom) {
+            Log.w(TAG, "KeyStoreManager: custom enabled but no valid entry found, falling back to debug")
+        }
+
         val ksFile = File(context.filesDir, KEYSTORE_FILE)
         Log.d(TAG, "KeyStoreManager: keystore exists=${ksFile.exists()}")
 
@@ -38,6 +50,34 @@ class KeyStoreManager(private val context: Context) {
 
         Log.d(TAG, "KeyStoreManager: generating new keystore")
         return generateKey(ksFile)
+    }
+
+    private fun loadCustomKey(entry: com.baozi.laninjector.model.SigningEntry): SigningKey {
+        val ksFile = File(entry.keystorePath!!)
+        require(ksFile.exists()) { "Keystore file not found: ${entry.keystorePath}" }
+
+        val ksType = if (entry.keystorePath.endsWith(".p12") || entry.keystorePath.endsWith(".pfx"))
+            "PKCS12" else "JKS"
+
+        val ks = try {
+            val store = KeyStore.getInstance(ksType)
+            ksFile.inputStream().use { store.load(it, entry.keystorePassword.toCharArray()) }
+            store
+        } catch (e: Exception) {
+            val altType = if (ksType == "PKCS12") "JKS" else "PKCS12"
+            val store = KeyStore.getInstance(altType)
+            ksFile.inputStream().use { store.load(it, entry.keystorePassword.toCharArray()) }
+            store
+        }
+
+        val alias = entry.keyAlias.ifEmpty {
+            ks.aliases().nextElement()
+        }
+        val privateKey = ks.getKey(alias, entry.keyPassword.toCharArray()) as PrivateKey
+        val certificate = ks.getCertificate(alias) as X509Certificate
+
+        Log.d(TAG, "KeyStoreManager: loaded custom key, alias=$alias")
+        return SigningKey(privateKey, certificate)
     }
 
     private fun loadKey(ksFile: File): SigningKey {

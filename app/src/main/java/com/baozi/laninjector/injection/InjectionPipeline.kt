@@ -5,6 +5,7 @@ import android.net.Uri
 import android.util.Log
 import com.baozi.laninjector.model.ApkInfo
 import com.baozi.laninjector.model.InjectionState
+import com.baozi.laninjector.model.SigningConfig
 import android.provider.OpenableColumns
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,7 +33,7 @@ class InjectionPipeline(private val context: Context) {
     var lastApkInfo: ApkInfo? = null
         private set
 
-    suspend fun inject(apkUri: Uri): String = withContext(Dispatchers.IO) {
+    suspend fun inject(apkUri: Uri, signingConfig: SigningConfig = SigningConfig()): String = withContext(Dispatchers.IO) {
         val tempDir = File(context.cacheDir, "apk_temp")
         tempDir.mkdirs()
         val tempApk = File(tempDir, "original.apk")
@@ -120,7 +121,7 @@ class InjectionPipeline(private val context: Context) {
             // Step 6: Sign APK
             Log.d(TAG, "Step 6: Signing APK")
             _state.value = InjectionState.Signing()
-            val signingKey = keyStoreManager.getSigningKey()
+            val signingKey = keyStoreManager.getSigningKey(signingConfig)
             signer.sign(alignedApk, signedApk, signingKey)
             Log.d(TAG, "APK signed: ${signedApk.absolutePath} (${signedApk.length()} bytes)")
 

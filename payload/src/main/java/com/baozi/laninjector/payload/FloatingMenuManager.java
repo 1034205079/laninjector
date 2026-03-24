@@ -64,6 +64,17 @@ public class FloatingMenuManager {
             handler.post(() -> reattachBall(newActivity));
         });
 
+        // Hide/show when app goes to background/foreground
+        tracker.setOnForegroundChangeListener(foreground -> {
+            handler.post(() -> {
+                if (foreground) {
+                    setAllViewsVisibility(View.VISIBLE);
+                } else {
+                    setAllViewsVisibility(View.GONE);
+                }
+            });
+        });
+
         // Listen for ALL activity resumes to detect overlay permission grant
         activity.getApplication().registerActivityLifecycleCallbacks(
                 new android.app.Application.ActivityLifecycleCallbacks() {
@@ -140,6 +151,11 @@ public class FloatingMenuManager {
         panelView = null;
         removeFromWindow(stopButton);
         stopButton = null;
+
+        // If panel was open, reset to idle since the panel is gone
+        if (state == State.PANEL_OPEN) {
+            state = State.IDLE;
+        }
 
         // Check if window is ready
         try {
@@ -409,6 +425,12 @@ public class FloatingMenuManager {
         } catch (Exception e) {
             Log.e(TAG, "Failed to remove view from window", e);
         }
+    }
+
+    private void setAllViewsVisibility(int visibility) {
+        if (ballView != null) ballView.setVisibility(visibility);
+        if (panelView != null) panelView.setVisibility(visibility);
+        if (stopButton != null) stopButton.setVisibility(visibility);
     }
 
     private int dpToPx(Activity activity, int dp) {

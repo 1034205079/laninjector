@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import com.baozi.laninjector.injection.InjectionPipeline
 import com.baozi.laninjector.model.ApkInfo
 import com.baozi.laninjector.model.InjectionState
+import com.baozi.laninjector.model.SigningConfig
 import com.baozi.laninjector.ui.screens.HomeScreen
 import com.baozi.laninjector.ui.screens.ProgressScreen
 import com.baozi.laninjector.ui.screens.ResultScreen
@@ -37,6 +38,9 @@ class MainActivity : ComponentActivity() {
                 var selectedUri by remember { mutableStateOf<Uri?>(null) }
                 var apkInfo by remember { mutableStateOf<ApkInfo?>(null) }
                 var analyzeError by remember { mutableStateOf<String?>(null) }
+                var signingConfig by remember { mutableStateOf(SigningConfig.load(this@MainActivity)) }
+                var pendingKeystoreEntryId by remember { mutableStateOf<String?>(null) }
+                var pendingKeystorePath by remember { mutableStateOf<String?>(null) }
 
                 Scaffold(modifier = Modifier.fillMaxSize()) { paddingValues ->
                     val screenModifier = Modifier.padding(paddingValues)
@@ -45,6 +49,7 @@ class MainActivity : ComponentActivity() {
                             HomeScreen(
                                 modifier = screenModifier,
                                 apkInfo = apkInfo,
+                                signingConfig = signingConfig,
                                 onApkSelected = { uri: Uri ->
                                     selectedUri = uri
                                     apkInfo = null
@@ -60,18 +65,41 @@ class MainActivity : ComponentActivity() {
                                     }
                                 },
                                 onInjectClick = {
-                                    // Prevent double-click: only inject if still Idle
                                     if (pipeline.state.value is InjectionState.Idle) {
                                         selectedUri?.let { uri ->
                                             scope.launch {
                                                 try {
-                                                    pipeline.inject(uri)
+                                                    pipeline.inject(uri, signingConfig)
                                                 } catch (_: Exception) {
                                                 }
                                             }
                                         }
                                     }
-                                }
+                                },
+                                onSigningConfigChanged = { newConfig ->
+                                    signingConfig = newConfig
+                                    SigningConfig.save(this@MainActivity, newConfig)
+                                },
+                                onKeystoreSelected = { uri, entryId ->
+                                    try {
+                                        val path = SigningConfig.copyKeystoreToInternal(
+                                            this@MainActivity, uri, entryId)
+                                        pendingKeystorePath = path
+                                        pendingKeystoreEntryId = entryId
+                                        // Update the entry if it already exists in the list
+                                        val existing = signingConfig.entries.any { it.id == entryId }
+                                        if (existing) {
+                                            val newEntries = signingConfig.entries.map {
+                                                if (it.id == entryId) it.copy(keystorePath = path) else it
+                                            }
+                                            signingConfig = signingConfig.copy(entries = newEntries)
+                                            SigningConfig.save(this@MainActivity, signingConfig)
+                                        }
+                                    } catch (e: Exception) {
+                                        analyzeError = "Failed to load keystore: ${e.message}"
+                                    }
+                                },
+                                pendingKeystorePath = pendingKeystorePath
                             )
                         }
 
