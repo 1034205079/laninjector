@@ -17,6 +17,7 @@ import java.io.File
 
 @Composable
 fun ResultScreen(
+    modifier: Modifier = Modifier,
     outputPath: String?,
     errorStep: String?,
     errorMessage: String?,
@@ -26,9 +27,10 @@ fun ResultScreen(
     val isSuccess = outputPath != null
 
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxSize()
-            .padding(24.dp),
+            .padding(horizontal = 24.dp)
+            .padding(top = 80.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {

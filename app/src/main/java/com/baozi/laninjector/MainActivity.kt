@@ -39,10 +39,11 @@ class MainActivity : ComponentActivity() {
                 var analyzeError by remember { mutableStateOf<String?>(null) }
 
                 Scaffold(modifier = Modifier.fillMaxSize()) { paddingValues ->
-                    val contentModifier = Modifier.padding(paddingValues)
+                    val screenModifier = Modifier.padding(paddingValues)
                     when (state) {
                         is InjectionState.Idle -> {
                             HomeScreen(
+                                modifier = screenModifier,
                                 apkInfo = apkInfo,
                                 onApkSelected = { uri: Uri ->
                                     selectedUri = uri
@@ -79,11 +80,12 @@ class MainActivity : ComponentActivity() {
                         is InjectionState.InjectingDex,
                         is InjectionState.Rebuilding,
                         is InjectionState.Signing -> {
-                            ProgressScreen(state = state)
+                            ProgressScreen(modifier = screenModifier, state = state)
                         }
 
                         is InjectionState.Success -> {
                             ResultScreen(
+                                modifier = screenModifier,
                                 outputPath = (state as InjectionState.Success).outputPath,
                                 errorStep = null,
                                 errorMessage = null,
@@ -97,6 +99,7 @@ class MainActivity : ComponentActivity() {
 
                         is InjectionState.Error -> {
                             ResultScreen(
+                                modifier = screenModifier,
                                 outputPath = null,
                                 errorStep = (state as InjectionState.Error).step,
                                 errorMessage = (state as InjectionState.Error).message,

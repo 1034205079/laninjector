@@ -10,7 +10,7 @@ import androidx.compose.ui.unit.dp
 import com.baozi.laninjector.model.InjectionState
 
 @Composable
-fun ProgressScreen(state: InjectionState) {
+fun ProgressScreen(modifier: Modifier = Modifier, state: InjectionState) {
     val steps = listOf(
         "Analyzing APK" to (state is InjectionState.Analyzing || state.ordinal() > 0),
         "Patching Manifest" to (state is InjectionState.PatchingManifest || state.ordinal() > 1),
@@ -20,9 +20,10 @@ fun ProgressScreen(state: InjectionState) {
     )
 
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxSize()
-            .padding(24.dp),
+            .padding(horizontal = 24.dp)
+            .padding(top = 80.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(

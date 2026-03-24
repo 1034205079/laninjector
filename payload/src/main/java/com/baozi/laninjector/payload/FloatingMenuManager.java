@@ -45,7 +45,8 @@ public class FloatingMenuManager {
     private int currentIndex = 0;
     private boolean pendingOverlayUpgrade = false;
 
-    private static final int BALL_SIZE_DP = 56;
+    private static final int BALL_WIDTH_DP = 80;
+    private static final int BALL_HEIGHT_DP = 56;
 
     // Ball position (in pixels)
     private int ballX;
@@ -111,10 +112,12 @@ public class FloatingMenuManager {
     private void showBall(Activity activity) {
         if (ballView != null && ballView.getParent() != null) return;
 
-        int ballSize = dpToPx(activity, BALL_SIZE_DP);
+        int ballW = dpToPx(activity, BALL_WIDTH_DP);
+        int ballH = dpToPx(activity, BALL_HEIGHT_DP);
 
         ballView = new FloatingBallView(activity);
-        ballView.setDisplayText("L");
+        ballView.setDisplayText("Start");
+        ballView.setShowArrow(false);
         ballView.setClickCallback(this::onBallClicked);
 
         ballView.setDragListener((dx, dy) -> {
@@ -123,8 +126,7 @@ public class FloatingMenuManager {
             updateViewPosition(ballView, ballX, ballY);
         });
 
-        addToWindow(activity, ballView, ballSize, ballSize, ballX, ballY);
-        Log.d(TAG, "Ball attached to activity: " + activity.getClass().getSimpleName());
+        addToWindow(activity, ballView, ballW, ballH, ballX, ballY);
     }
 
     private void reattachBall(Activity activity) {
@@ -153,13 +155,16 @@ public class FloatingMenuManager {
         }
 
         // Recreate ball with new activity context
-        String currentText = ballView != null ? ballView.getDisplayText() : "L";
+        String currentText = ballView != null ? ballView.getDisplayText() : "Start";
         int currentColor = ballView != null ? ballView.getBallColor() : 0xFF6200EE;
+        boolean currentArrow = state == State.CYCLING;
 
-        int ballSize = dpToPx(activity, BALL_SIZE_DP);
+        int ballW = dpToPx(activity, BALL_WIDTH_DP);
+        int ballH = dpToPx(activity, BALL_HEIGHT_DP);
         ballView = new FloatingBallView(activity);
         ballView.setDisplayText(currentText);
         ballView.setBallColor(currentColor);
+        ballView.setShowArrow(currentArrow);
         ballView.setClickCallback(this::onBallClicked);
         ballView.setDragListener((dx, dy) -> {
             ballX += (int) dx;
@@ -167,7 +172,7 @@ public class FloatingMenuManager {
             updateViewPosition(ballView, ballX, ballY);
         });
 
-        addToWindow(activity, ballView, ballSize, ballSize, ballX, ballY);
+        addToWindow(activity, ballView, ballW, ballH, ballX, ballY);
 
         // Re-add stop button if cycling
         if (state == State.CYCLING) {
@@ -207,13 +212,15 @@ public class FloatingMenuManager {
         int panelWidth = Math.min(dpToPx(activity, 300), dm.widthPixels - dpToPx(activity, 32));
         int panelHeight = Math.min(dpToPx(activity, 400), dm.heightPixels - dpToPx(activity, 100));
 
-        // Position panel to the right of the ball so it doesn't cover the X button
-        int ballRight = ballX + dpToPx(activity, BALL_SIZE_DP) + dpToPx(activity, 8);
-        int panelX = Math.min(ballRight, dm.widthPixels - panelWidth - dpToPx(activity, 8));
-        int panelY = (dm.heightPixels - panelHeight) / 2;
+        // Position panel below the ball, centered horizontally
+        int panelX = (dm.widthPixels - panelWidth) / 2;
+        int ballBottom = ballY + dpToPx(activity, BALL_HEIGHT_DP) + dpToPx(activity, 12);
+        int panelY = Math.min(ballBottom, dm.heightPixels - panelHeight - dpToPx(activity, 16));
         addToWindow(activity, panelView, panelWidth, panelHeight, panelX, panelY);
 
-        ballView.setDisplayText("X");
+        ballView.setDisplayText("Close");
+        ballView.setShowArrow(false);
+        ballView.setBallColor(0xFFF44336);
         ballView.setClickCallback(() -> {
             hidePanel();
             resetToIdle();
@@ -239,6 +246,7 @@ public class FloatingMenuManager {
 
         String displayName = LocaleUtils.formatForDisplay(locale);
         ballView.setDisplayText(displayName);
+        ballView.setShowArrow(true);
         ballView.setBallColor(0xFF03DAC5);
         ballView.setClickCallback(this::onBallClicked);
 
@@ -259,7 +267,8 @@ public class FloatingMenuManager {
         Log.d(TAG, "Reset to idle");
         state = State.IDLE;
         hideStopButton();
-        ballView.setDisplayText("L");
+        ballView.setDisplayText("Start");
+        ballView.setShowArrow(false);
         ballView.setBallColor(0xFF6200EE);
         ballView.setClickCallback(this::onBallClicked);
     }
@@ -271,6 +280,7 @@ public class FloatingMenuManager {
 
         stopButton = new FloatingBallView(activity);
         stopButton.setDisplayText("Stop");
+        stopButton.setShowArrow(false);
         stopButton.setBallColor(0xFFF44336);
         stopButton.setClickCallback(() -> {
             hideStopButton();
@@ -278,7 +288,7 @@ public class FloatingMenuManager {
         });
 
         int size = dpToPx(activity, 40);
-        int stopX = ballX + dpToPx(activity, BALL_SIZE_DP) + dpToPx(activity, 8);
+        int stopX = ballX + dpToPx(activity, BALL_WIDTH_DP) + dpToPx(activity, 8);
         int stopY = ballY + dpToPx(activity, 8);
         addToWindow(activity, stopButton, size, size, stopX, stopY);
     }
