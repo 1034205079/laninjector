@@ -26,6 +26,7 @@ class ManifestPatcher {
         private const val TYPE_INT_BOOLEAN = 0x12
 
         private const val PROVIDER_CLASS = "com.baozi.laninjector.payload.PayloadProvider"
+        private const val PERMISSION_NAME = "android.permission.SYSTEM_ALERT_WINDOW"
     }
 
     /**
@@ -74,6 +75,11 @@ class ManifestPatcher {
         val classNameIdx = findOrAddString(stringPool, stringMap, PROVIDER_CLASS)
         val authValueIdx = findOrAddString(stringPool, stringMap, authorities)
 
+        // Permission-related strings
+        val hasPermission = stringMap.containsKey(PERMISSION_NAME)
+        val usesPermissionTagIdx = findOrAddString(stringPool, stringMap, "uses-permission")
+        val permissionValueIdx = findOrAddString(stringPool, stringMap, PERMISSION_NAME)
+
         // Build old->new index mapping for any inserted strings
         val indexMapping = buildIndexMapping(stringPool)
 
@@ -87,6 +93,8 @@ class ManifestPatcher {
         val finalProviderTagIdx = mapIdx(providerTagIdx)
         val finalClassNameIdx = mapIdx(classNameIdx)
         val finalAuthValueIdx = mapIdx(authValueIdx)
+        val finalUsesPermTagIdx = mapIdx(usesPermissionTagIdx)
+        val finalPermValueIdx = mapIdx(permissionValueIdx)
 
         // ===== Phase 3: Rebuild binary =====
         val output = ByteArrayOutputStream()
@@ -103,9 +111,10 @@ class ManifestPatcher {
         val newResIdBytes = serializeResourceIdTable(resIdTable)
         output.write(newResIdBytes)
 
-        // ===== Phase 4: Copy XML chunks with index adjustment and provider insertion =====
+        // ===== Phase 4: Copy XML chunks with index adjustment and element insertion =====
         var pos = xmlStart
         var applicationInserted = false
+        var permissionInserted = hasPermission // skip if already exists
 
         while (pos < data.size) {
             val chunkType = readIntLE(data, pos)
@@ -115,6 +124,19 @@ class ManifestPatcher {
             // Copy chunk with adjusted string indices
             val adjustedChunk = adjustChunkStringIndices(data, pos, chunkSize, chunkType, indexMapping)
             output.write(adjustedChunk)
+
+            // After <manifest> START_TAG, insert <uses-permission> element
+            if (!permissionInserted && chunkType == CHUNK_START_TAG) {
+                val tagNameIdx = readIntLE(data, pos + 20)
+                val originalTagName = stringPool.originalStrings.getOrNull(tagNameIdx)
+                if (originalTagName == "manifest") {
+                    permissionInserted = true
+                    Log.d(TAG, "ManifestPatcher: inserting <uses-permission> after <manifest>")
+                    writeUsesPermissionElement(output,
+                        finalUsesPermTagIdx, finalAndroidNsIdx,
+                        finalNameIdx, finalPermValueIdx)
+                }
+            }
 
             // After <application> START_TAG, insert <provider> element
             if (!applicationInserted && chunkType == CHUNK_START_TAG) {
@@ -565,6 +587,45 @@ class ManifestPatcher {
 
         writeIntLE(out, -1)              // namespace URI
         writeIntLE(out, providerTagIdx)   // name = "provider"
+    }
+
+    /**
+     * Write <uses-permission android:name="..."/> as START_TAG + END_TAG.
+     */
+    private fun writeUsesPermissionElement(
+        out: ByteArrayOutputStream,
+        tagIdx: Int, androidNsIdx: Int,
+        nameAttrIdx: Int, permValueIdx: Int
+    ) {
+        // START_TAG with 1 attribute: android:name = permission string
+        val attrCount = 1
+        val chunkSize = 36 + attrCount * 20
+
+        writeIntLE(out, CHUNK_START_TAG)
+        writeIntLE(out, chunkSize)
+        writeIntLE(out, 1)                // line number
+        writeIntLE(out, -1)               // comment
+
+        writeIntLE(out, -1)               // namespace URI (none on element)
+        writeIntLE(out, tagIdx)           // name = "uses-permission"
+        writeShortLE(out, 0x0014)         // attributeStart
+        writeShortLE(out, 0x0014)         // attributeSize
+        writeShortLE(out, attrCount)      // attributeCount
+        writeShortLE(out, 0)              // idIndex
+        writeShortLE(out, 0)              // classIndex
+        writeShortLE(out, 0)              // styleIndex
+
+        // android:name = permission value (TYPE_STRING)
+        writeAttr(out, androidNsIdx, nameAttrIdx, permValueIdx, TYPE_STRING, permValueIdx)
+
+        // END_TAG
+        writeIntLE(out, CHUNK_END_TAG)
+        writeIntLE(out, 24)
+        writeIntLE(out, 1)
+        writeIntLE(out, -1)
+
+        writeIntLE(out, -1)
+        writeIntLE(out, tagIdx)           // name = "uses-permission"
     }
 
     private fun writeAttr(

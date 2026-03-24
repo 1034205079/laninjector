@@ -1,9 +1,13 @@
 package com.baozi.laninjector.payload;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.graphics.PixelFormat;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.Gravity;
@@ -65,6 +69,20 @@ public class FloatingMenuManager {
             Log.w(TAG, "No current activity, cannot show ball");
             return;
         }
+
+        // Request overlay permission if not granted
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(activity)) {
+            Log.d(TAG, "Overlay permission not granted, requesting...");
+            try {
+                Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:" + activity.getPackageName()));
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                activity.startActivity(intent);
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to open overlay permission settings", e);
+            }
+        }
+
         Log.d(TAG, "Showing floating ball (WindowManager panel)");
         showBall(activity);
     }
@@ -261,9 +279,21 @@ public class FloatingMenuManager {
         try {
             if (view.getParent() != null) return;
 
+            // Check if we can use system overlay (above everything including Dialogs)
+            boolean canOverlay = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                    && Settings.canDrawOverlays(activity);
+
+            int windowType;
+            if (canOverlay) {
+                windowType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;
+                Log.d(TAG, "Using TYPE_APPLICATION_OVERLAY (above Dialogs)");
+            } else {
+                windowType = WindowManager.LayoutParams.TYPE_APPLICATION_PANEL;
+            }
+
             WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                     width, height,
-                    WindowManager.LayoutParams.TYPE_APPLICATION_PANEL,
+                    windowType,
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                             | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                             | WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
@@ -272,12 +302,16 @@ public class FloatingMenuManager {
             params.gravity = Gravity.TOP | Gravity.START;
             params.x = x;
             params.y = y;
-            params.token = activity.getWindow().getDecorView().getWindowToken();
 
-            if (params.token == null) {
-                Log.w(TAG, "Window token still null, falling back to content view");
-                addToContentView(activity, view, width, height, x, y);
-                return;
+            // TYPE_APPLICATION_OVERLAY doesn't need a token;
+            // TYPE_APPLICATION_PANEL needs the activity's window token
+            if (!canOverlay) {
+                params.token = activity.getWindow().getDecorView().getWindowToken();
+                if (params.token == null) {
+                    Log.w(TAG, "Window token still null, falling back to content view");
+                    addToContentView(activity, view, width, height, x, y);
+                    return;
+                }
             }
 
             activity.getWindowManager().addView(view, params);
