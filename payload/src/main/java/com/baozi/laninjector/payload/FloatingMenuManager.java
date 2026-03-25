@@ -281,6 +281,8 @@ public class FloatingMenuManager {
 
     private void resetToIdle() {
         Log.d(TAG, "Reset to idle");
+        // Set state first, before removing views, so that reattachBall
+        // (triggered by activity recreate) won't re-add the stop button
         state = State.IDLE;
         hideStopButton();
         ballView.setDisplayText("Start");
@@ -295,19 +297,20 @@ public class FloatingMenuManager {
         if (stopButton != null && stopButton.getParent() != null) return;
 
         stopButton = new FloatingBallView(activity);
-        stopButton.setDisplayText("X");
+        stopButton.setDisplayText("Stop");
         stopButton.setShowArrow(false);
-        stopButton.setBallColor(0xAAF44336);
+        stopButton.setBallColor(0xFFF44336);
         stopButton.setClickCallback(() -> {
             hideStopButton();
             resetToIdle();
         });
 
-        // Small circle at top-right corner of the ball
-        int size = dpToPx(activity, 22);
-        int stopX = ballX + dpToPx(activity, BALL_WIDTH_DP) - size / 2;
-        int stopY = ballY - size / 2;
-        addToWindow(activity, stopButton, size, size, stopX, stopY);
+        // Position below the ball, same width, smaller height
+        int stopW = dpToPx(activity, BALL_WIDTH_DP);
+        int stopH = dpToPx(activity, 36);
+        int stopX = ballX;
+        int stopY = ballY + dpToPx(activity, BALL_HEIGHT_DP) + dpToPx(activity, 4);
+        addToWindow(activity, stopButton, stopW, stopH, stopX, stopY);
     }
 
     private void hideStopButton() {
@@ -321,7 +324,12 @@ public class FloatingMenuManager {
         // DecorView may not have a window token yet during onActivityResumed,
         // so post to ensure the window is fully attached first
         View decorView = activity.getWindow().getDecorView();
-        decorView.post(() -> addToWindowNow(activity, view, width, height, x, y));
+        // Tag the view so we can cancel pending additions if the view is removed before post runs
+        view.setTag(Boolean.TRUE);
+        decorView.post(() -> {
+            if (view.getTag() == null) return; // was cancelled by removeFromWindow
+            addToWindowNow(activity, view, width, height, x, y);
+        });
     }
 
     private void addToWindowNow(Activity activity, View view, int width, int height, int x, int y) {
@@ -414,7 +422,10 @@ public class FloatingMenuManager {
     }
 
     private void removeFromWindow(View view) {
-        if (view == null || view.getParent() == null) return;
+        if (view == null) return;
+        // Cancel any pending async addToWindow post
+        view.setTag(null);
+        if (view.getParent() == null) return;
         try {
             Activity activity = activityTracker.getCurrentActivity();
             if (activity != null) {

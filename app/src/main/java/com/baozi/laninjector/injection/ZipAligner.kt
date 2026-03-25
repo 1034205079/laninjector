@@ -124,7 +124,7 @@ class ZipAligner {
             writeShortLE(output, 20)                    // version needed
             writeShortLE(output, newFlags)               // flags (no data descriptor)
             writeShortLE(output, info.method)            // method
-            writeShortLE(output, info.time)              // time
+            writeShortLE(output, info.time)              // time在
             writeShortLE(output, info.date)              // date
             writeIntLE(output, info.crc.toInt())         // crc32
             writeIntLE(output, info.compressedSize.toInt()) // compressed size

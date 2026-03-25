@@ -9,6 +9,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -97,12 +102,13 @@ fun HomeScreen(
     }
 
     Box(modifier = modifier.fillMaxSize()) {
+        val scrollState = rememberScrollState()
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 24.dp)
                 .padding(top = 80.dp, bottom = 48.dp)
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(scrollState),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
@@ -131,6 +137,24 @@ fun HomeScreen(
             }
 
             Spacer(modifier = Modifier.height(16.dp))
+
+            // Inject button (below Change APK)
+            if (apkInfo != null) {
+                Button(
+                    onClick = onInjectClick,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = apkInfo.locales.isNotEmpty()
+                ) {
+                    Text("Inject Language Menu")
+                }
+                if (apkInfo.locales.isEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("No locale resources found in this APK",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error)
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
 
             // APK Info card
             if (apkInfo != null) {
@@ -176,26 +200,31 @@ fun HomeScreen(
                 }
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Inject button
-            if (apkInfo != null) {
-                Button(
-                    onClick = onInjectClick,
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = apkInfo.locales.isNotEmpty()
-                ) {
-                    Text("Inject Language Menu")
-                }
-                if (apkInfo.locales.isEmpty()) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("No locale resources found in this APK",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error)
-                }
-            }
-
             Spacer(modifier = Modifier.height(48.dp))
+        }
+
+        // Scrollbar on the right edge of the screen
+        if (scrollState.maxValue > 0) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .fillMaxHeight()
+                    .padding(end = 2.dp, top = 80.dp, bottom = 48.dp)
+                    .drawWithContent {
+                        drawContent()
+                        val viewH = size.height
+                        val barH = viewH * 0.3f // 30% of visible area
+                        val scrollFraction = scrollState.value.toFloat() / scrollState.maxValue
+                        val barY = scrollFraction * (viewH - barH)
+                        drawRoundRect(
+                            color = Color.DarkGray.copy(alpha = 0.6f),
+                            topLeft = Offset(0f, barY),
+                            size = Size(6.dp.toPx(), barH),
+                            cornerRadius = CornerRadius(3.dp.toPx())
+                        )
+                    }
+                    .width(6.dp)
+            )
         }
 
         // Footer

@@ -23,7 +23,15 @@
       "Bash(./gradlew :payload:tasks --all)",
       "Bash(./gradlew :payload:tasks)",
       "Bash(./gradlew :payload:build)",
-      "Bash(./gradlew assembleDebug)"
+      "Bash(./gradlew assembleDebug)",
+      "mcp__ide__getDiagnostics",
+      "WebFetch(domain:www.svgrepo.com)",
+      "WebFetch(domain:commons.wikimedia.org)",
+      "WebFetch(domain:www.angularjswiki.com)",
+      "WebFetch(domain:fontawesomeicons.com)",
+      "WebFetch(domain:igoutu.cn)",
+      "Read(//c/Users/songxiaofei/Desktop/**)",
+      "Read(//mnt/c/Users/songxiaofei/**)"
     ]
   }
 }
