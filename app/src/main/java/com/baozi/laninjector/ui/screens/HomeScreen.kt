@@ -42,6 +42,7 @@ fun HomeScreen(
     pendingKeystorePath: String? = null
 ) {
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
+    var showFlutterWarning by remember { mutableStateOf(false) }
     // Track which entry is being edited (for keystore file picker)
     var editingEntryId by remember { mutableStateOf<String?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
@@ -100,6 +101,26 @@ fun HomeScreen(
                 keystorePicker.launch(arrayOf("*/*"))
             },
             currentKeystorePath = pendingKeystorePath
+        )
+    }
+
+    // Flutter warning dialog
+    if (showFlutterWarning) {
+        AlertDialog(
+            onDismissRequest = { showFlutterWarning = false },
+            title = { Text("Flutter 应用提示") },
+            text = {
+                Text("检测到这是一个 Flutter 应用。\n\n在 Android 13 以下设备上，切换语言需要重启 Activity，可能会出现 Splash 页面并回到首页。\n\n建议在 Android 13 及以上设备上运行以获得最佳体验。\n\n是否继续注入？")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showFlutterWarning = false
+                    onInjectClick()
+                }) { Text("继续") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showFlutterWarning = false }) { Text("取消") }
+            }
         )
     }
 
@@ -166,7 +187,13 @@ fun HomeScreen(
             // Inject button (below Select APK area)
             if (apkInfo != null) {
                 Button(
-                    onClick = onInjectClick,
+                    onClick = {
+                        if (apkInfo.isFlutter) {
+                            showFlutterWarning = true
+                        } else {
+                            onInjectClick()
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = apkInfo.locales.isNotEmpty(),
                     colors = ButtonDefaults.buttonColors(
@@ -198,6 +225,14 @@ fun HomeScreen(
                         InfoRow("Launcher", apkInfo.launcherActivity.substringAfterLast('.'))
                         InfoRow("DEX Files", apkInfo.dexCount.toString())
                         InfoRow("Languages", "${apkInfo.locales.size} found")
+                        if (apkInfo.isFlutter) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "⚠ Flutter 应用 · 建议 Android 13+ 设备使用",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
                         if (apkInfo.locales.isNotEmpty()) {
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(

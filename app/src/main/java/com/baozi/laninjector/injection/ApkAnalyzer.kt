@@ -21,6 +21,7 @@ class ApkAnalyzer(private val context: Context) {
         var arscBytes: ByteArray? = null
         val entries = mutableListOf<String>()
         var dexCount = 0
+        var isFlutter = false
 
         var entry = zipStream.nextEntry
         while (entry != null) {
@@ -41,6 +42,12 @@ class ApkAnalyzer(private val context: Context) {
 
             if (name.matches(Regex("classes\\d*\\.dex"))) {
                 dexCount++
+            }
+
+            // Detect Flutter by presence of flutter engine library or assets
+            if (!isFlutter && (name.contains("libflutter.so") || name == "assets/flutter_assets/kernel_blob.bin"
+                        || name.startsWith("assets/flutter_assets/"))) {
+                isFlutter = true
             }
 
             zipStream.closeEntry()
@@ -66,7 +73,8 @@ class ApkAnalyzer(private val context: Context) {
             packageName = manifestInfo.first,
             launcherActivity = manifestInfo.second,
             locales = locales,
-            dexCount = dexCount
+            dexCount = dexCount,
+            isFlutter = isFlutter
         )
     }
 
