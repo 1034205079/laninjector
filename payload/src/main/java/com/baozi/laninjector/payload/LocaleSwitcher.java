@@ -49,8 +49,27 @@ public class LocaleSwitcher {
         forceUpdateResources(activity, locale);
         forceUpdateResources(activity.getApplicationContext(), locale);
 
-        Log.d(TAG, "Locale set to " + locale + ", calling recreate()");
-        activity.recreate();
+        // Flutter apps: recreate() would restart the Flutter engine and show splash again.
+        // Just updating Resources is enough since Flutter renders its own UI.
+        if (isFlutterActivity(activity)) {
+            Log.d(TAG, "Flutter app detected, skipping recreate() to avoid splash restart");
+        } else {
+            Log.d(TAG, "Locale set to " + locale + ", calling recreate()");
+            activity.recreate();
+        }
+    }
+
+    /** Check if the activity is a Flutter activity by walking the class hierarchy */
+    private static boolean isFlutterActivity(Activity activity) {
+        Class<?> clazz = activity.getClass();
+        while (clazz != null && clazz != Object.class) {
+            if (clazz.getName().equals("io.flutter.embedding.android.FlutterActivity")
+                    || clazz.getName().equals("io.flutter.app.FlutterActivity")) {
+                return true;
+            }
+            clazz = clazz.getSuperclass();
+        }
+        return false;
     }
 
 

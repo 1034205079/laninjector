@@ -14,6 +14,8 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -103,6 +105,27 @@ fun HomeScreen(
 
     Box(modifier = modifier.fillMaxSize()) {
         val scrollState = rememberScrollState()
+
+        // Back arrow (top-left) to re-select APK when one is already selected
+        if (selectedUri != null) {
+            IconButton(
+                onClick = {
+                    selectedUri = null
+                    // Trigger file picker again
+                    apkPicker.launch(arrayOf("application/vnd.android.package-archive"))
+                },
+                modifier = Modifier
+                    .padding(start = 8.dp, top = 32.dp)
+                    .align(Alignment.TopStart)
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Change APK",
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -128,22 +151,28 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(40.dp))
 
-            // Select APK button
-            OutlinedButton(
-                onClick = { apkPicker.launch(arrayOf("application/vnd.android.package-archive")) },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(if (selectedUri != null) "Change APK" else "Select APK")
+            // Select APK button (only when no APK selected)
+            if (selectedUri == null) {
+                OutlinedButton(
+                    onClick = { apkPicker.launch(arrayOf("application/vnd.android.package-archive")) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Select APK")
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Inject button (below Change APK)
+            // Inject button (below Select APK area)
             if (apkInfo != null) {
                 Button(
                     onClick = onInjectClick,
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = apkInfo.locales.isNotEmpty()
+                    enabled = apkInfo.locales.isNotEmpty(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF81C784),
+                        contentColor = Color.White
+                    )
                 ) {
                     Text("Inject Language Menu")
                 }

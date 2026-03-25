@@ -135,9 +135,20 @@ public class FloatingMenuManager {
             ballX += (int) dx;
             ballY += (int) dy;
             updateViewPosition(ballView, ballX, ballY);
+            updateStopButtonPosition();
         });
 
         addToWindow(activity, ballView, ballW, ballH, ballX, ballY);
+    }
+
+    /** Keep stop button positioned below the ball */
+    private void updateStopButtonPosition() {
+        if (stopButton == null || stopButton.getParent() == null) return;
+        Activity activity = activityTracker.getCurrentActivity();
+        if (activity == null) return;
+        int stopX = ballX;
+        int stopY = ballY + dpToPx(activity, BALL_HEIGHT_DP) + dpToPx(activity, 4);
+        updateViewPosition(stopButton, stopX, stopY);
     }
 
     private void reattachBall(Activity activity) {
@@ -186,6 +197,7 @@ public class FloatingMenuManager {
             ballX += (int) dx;
             ballY += (int) dy;
             updateViewPosition(ballView, ballX, ballY);
+            updateStopButtonPosition();
         });
 
         addToWindow(activity, ballView, ballW, ballH, ballX, ballY);

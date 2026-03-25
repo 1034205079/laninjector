@@ -34,8 +34,8 @@ class ApkRebuilder {
         for (entry in zipFile.entries()) {
             val name = entry.name
 
-            // Skip signature files
-            if (name.startsWith("META-INF/")) continue
+            // Skip signature files only, keep other META-INF entries (e.g. services/)
+            if (name.startsWith("META-INF/") && isSignatureFile(name)) continue
 
             when {
                 name == "AndroidManifest.xml" && modifiedManifest != null -> {
@@ -148,5 +148,15 @@ class ApkRebuilder {
         zipOut.putNextEntry(entry)
         zipOut.write(data)
         zipOut.closeEntry()
+    }
+
+    /** Only skip actual signature files, not all META-INF entries */
+    private fun isSignatureFile(name: String): Boolean {
+        val upper = name.uppercase()
+        return upper.endsWith(".SF")
+                || upper.endsWith(".RSA")
+                || upper.endsWith(".DSA")
+                || upper.endsWith(".EC")
+                || upper == "META-INF/MANIFEST.MF"
     }
 }
