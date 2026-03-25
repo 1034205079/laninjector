@@ -46,13 +46,17 @@ public class LocaleSwitcher {
 
         // Apply to current process immediately
         Locale.setDefault(locale);
+
+        // Update resources
         forceUpdateResources(activity, locale);
         forceUpdateResources(activity.getApplicationContext(), locale);
 
-        // Flutter apps: recreate() would restart the Flutter engine and show splash again.
-        // Just updating Resources is enough since Flutter renders its own UI.
         if (isFlutterActivity(activity)) {
-            Log.d(TAG, "Flutter app detected, skipping recreate() to avoid splash restart");
+            // Flutter apps: recreate() would restart the Flutter engine and show splash.
+            // Instead, dispatch onConfigurationChanged() so Flutter's engine picks up the
+            // new locale and sends it to Dart via localizationChannel.
+            Log.d(TAG, "Flutter app detected, dispatching onConfigurationChanged instead of recreate()");
+            notifyFlutterConfigChanged(activity, locale);
         } else {
             Log.d(TAG, "Locale set to " + locale + ", calling recreate()");
             activity.recreate();
@@ -63,12 +67,161 @@ public class LocaleSwitcher {
     private static boolean isFlutterActivity(Activity activity) {
         Class<?> clazz = activity.getClass();
         while (clazz != null && clazz != Object.class) {
-            if (clazz.getName().equals("io.flutter.embedding.android.FlutterActivity")
-                    || clazz.getName().equals("io.flutter.app.FlutterActivity")) {
+            String name = clazz.getName();
+            if (name.equals("io.flutter.embedding.android.FlutterActivity")
+                    || name.equals("io.flutter.embedding.android.FlutterFragmentActivity")
+                    || name.equals("io.flutter.app.FlutterActivity")
+                    || name.equals("io.flutter.app.FlutterFragmentActivity")) {
                 return true;
             }
             clazz = clazz.getSuperclass();
         }
+        return false;
+    }
+
+    /**
+     * Notify Flutter engine of locale change via reflection.
+     * Method/field names may be obfuscated by R8/ProGuard, so we search by TYPE
+     * rather than by name. Class names like FlutterEngine are preserved.
+     *
+     * Chain: Activity → (find FlutterEngine by type) → (find method accepting Configuration)
+     * Falls back to onConfigurationChanged() if reflection fails.
+     */
+    private static void notifyFlutterConfigChanged(Activity activity, Locale locale) {
+        Configuration newConfig = new Configuration(activity.getResources().getConfiguration());
+        newConfig.setLocale(locale);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            newConfig.setLocales(new LocaleList(locale));
+        }
+
+        // Try 1: Find FlutterEngine via reflection (handles obfuscated method names)
+        try {
+            Object engine = findFlutterEngine(activity);
+            if (engine != null) {
+                Log.d(TAG, "Found FlutterEngine: " + engine.getClass().getName());
+
+                // Find and call sendLocalesToFlutter(Configuration) by parameter type
+                if (callSendLocalesToFlutter(engine, newConfig)) {
+                    Log.d(TAG, "Sent locale to Flutter via engine: " + locale);
+                    return;
+                }
+            } else {
+                Log.d(TAG, "FlutterEngine not found via reflection");
+            }
+        } catch (Exception e) {
+            Log.d(TAG, "Flutter engine reflection failed: " + e.getMessage());
+        }
+
+        // Try 2: Fallback to onConfigurationChanged (may work if app declared configChanges)
+        try {
+            activity.onConfigurationChanged(newConfig);
+            Log.d(TAG, "Fallback: dispatched onConfigurationChanged with locale: " + locale);
+        } catch (Exception e) {
+            Log.e(TAG, "onConfigurationChanged fallback failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Find FlutterEngine instance from the activity.
+     * Since method names may be obfuscated, we search by return type first,
+     * then fall back to searching fields by type.
+     */
+    private static Object findFlutterEngine(Activity activity) {
+        String engineClassName = "io.flutter.embedding.engine.FlutterEngine";
+
+        // Strategy A: Find a no-arg method that returns FlutterEngine
+        for (Method m : activity.getClass().getMethods()) {
+            if (m.getParameterTypes().length == 0
+                    && m.getReturnType().getName().equals(engineClassName)) {
+                try {
+                    m.setAccessible(true);
+                    Object result = m.invoke(activity);
+                    if (result != null) {
+                        Log.d(TAG, "Found engine via method: " + m.getName() + "()");
+                        return result;
+                    }
+                } catch (Exception e) {
+                    Log.d(TAG, "Method " + m.getName() + " failed: " + e.getMessage());
+                }
+            }
+        }
+
+        // Strategy B: Walk fields of activity (and its superclasses) for FlutterEngine
+        // FlutterActivity stores engine in a delegate, so also check 1 level deep
+        Class<?> clazz = activity.getClass();
+        while (clazz != null && clazz != Object.class) {
+            for (Field f : clazz.getDeclaredFields()) {
+                try {
+                    f.setAccessible(true);
+                    Object val = f.get(activity);
+                    if (val != null && val.getClass().getName().equals(engineClassName)) {
+                        Log.d(TAG, "Found engine in field: " + clazz.getSimpleName() + "." + f.getName());
+                        return val;
+                    }
+                    // Check one level deeper (delegate object may hold the engine)
+                    if (val != null) {
+                        for (Field f2 : val.getClass().getDeclaredFields()) {
+                            try {
+                                f2.setAccessible(true);
+                                Object val2 = f2.get(val);
+                                if (val2 != null && val2.getClass().getName().equals(engineClassName)) {
+                                    Log.d(TAG, "Found engine in field: " + f.getName() + "." + f2.getName());
+                                    return val2;
+                                }
+                            } catch (Exception ignored) {}
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+            clazz = clazz.getSuperclass();
+        }
+
+        return null;
+    }
+
+    /**
+     * Find and call sendLocalesToFlutter(Configuration) on the engine's localization plugin.
+     * Searches the engine's fields for an object that has a method accepting Configuration.
+     */
+    private static boolean callSendLocalesToFlutter(Object engine, Configuration config) {
+        // First: try methods directly on the engine that accept Configuration
+        for (Method m : engine.getClass().getMethods()) {
+            Class<?>[] params = m.getParameterTypes();
+            if (params.length == 1 && params[0] == Configuration.class) {
+                try {
+                    m.setAccessible(true);
+                    m.invoke(engine, config);
+                    Log.d(TAG, "Called engine." + m.getName() + "(config)");
+                    return true;
+                } catch (Exception e) {
+                    Log.d(TAG, "engine." + m.getName() + " failed: " + e.getMessage());
+                }
+            }
+        }
+
+        // Second: search engine's fields for plugin objects that accept Configuration
+        for (Field f : engine.getClass().getDeclaredFields()) {
+            try {
+                f.setAccessible(true);
+                Object plugin = f.get(engine);
+                if (plugin == null) continue;
+                for (Method m : plugin.getClass().getMethods()) {
+                    Class<?>[] params = m.getParameterTypes();
+                    if (params.length == 1 && params[0] == Configuration.class) {
+                        try {
+                            m.setAccessible(true);
+                            m.invoke(plugin, config);
+                            Log.d(TAG, "Called " + f.getName() + "." + m.getName() + "(config)");
+                            return true;
+                        } catch (Exception e) {
+                            Log.d(TAG, f.getName() + "." + m.getName() + " failed: " + e.getMessage());
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+
+        Log.d(TAG, "No sendLocalesToFlutter method found on engine or its plugins");
         return false;
     }
 
