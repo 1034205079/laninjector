@@ -230,29 +230,27 @@ public class FloatingMenuManager {
         Log.d(TAG, "Showing language panel");
         state = State.PANEL_OPEN;
 
+        // Hide the ball while panel is open
+        if (ballView != null) ballView.setVisibility(View.GONE);
+
         panelView = new LanguagePanelView(activity, locales);
         panelView.setStartCallback(selected -> {
             hidePanel();
             startCycling(selected);
+        });
+        panelView.setCloseCallback(() -> {
+            hidePanel();
+            resetToIdle();
         });
 
         DisplayMetrics dm = activity.getResources().getDisplayMetrics();
         int panelWidth = Math.min(dpToPx(activity, 300), dm.widthPixels - dpToPx(activity, 32));
         int panelHeight = Math.min(dpToPx(activity, 400), dm.heightPixels - dpToPx(activity, 100));
 
-        // Position panel below the ball, centered horizontally
+        // Center the panel on screen
         int panelX = (dm.widthPixels - panelWidth) / 2;
-        int ballBottom = ballY + dpToPx(activity, BALL_HEIGHT_DP) + dpToPx(activity, 12);
-        int panelY = Math.min(ballBottom, dm.heightPixels - panelHeight - dpToPx(activity, 16));
-        addToWindow(activity, panelView, panelWidth, panelHeight, panelX, panelY);
-
-        ballView.setDisplayText("Close");
-        ballView.setShowArrow(false);
-        ballView.setBallColor(0xFFF44336);
-        ballView.setClickCallback(() -> {
-            hidePanel();
-            resetToIdle();
-        });
+        int panelY = (dm.heightPixels - panelHeight) / 2;
+        addToWindow(activity, panelView, panelWidth, panelHeight, panelX, panelY, true);
     }
 
     private void hidePanel() {
@@ -265,6 +263,7 @@ public class FloatingMenuManager {
         this.selectedLocales = selected;
         this.currentIndex = 0;
         state = State.CYCLING;
+        if (ballView != null) ballView.setVisibility(View.VISIBLE);
         switchToCurrentLocale();
     }
 
@@ -293,10 +292,9 @@ public class FloatingMenuManager {
 
     private void resetToIdle() {
         Log.d(TAG, "Reset to idle");
-        // Set state first, before removing views, so that reattachBall
-        // (triggered by activity recreate) won't re-add the stop button
         state = State.IDLE;
         hideStopButton();
+        if (ballView != null) ballView.setVisibility(View.VISIBLE);
         ballView.setDisplayText("Start");
         ballView.setShowArrow(false);
         ballView.setBallColor(0xFF6200EE);
@@ -333,30 +331,34 @@ public class FloatingMenuManager {
     // ===== WindowManager helpers =====
 
     private void addToWindow(Activity activity, View view, int width, int height, int x, int y) {
-        // DecorView may not have a window token yet during onActivityResumed,
-        // so post to ensure the window is fully attached first
+        addToWindow(activity, view, width, height, x, y, false);
+    }
+
+    private void addToWindow(Activity activity, View view, int width, int height, int x, int y, boolean focusable) {
         View decorView = activity.getWindow().getDecorView();
-        // Tag the view so we can cancel pending additions if the view is removed before post runs
         view.setTag(Boolean.TRUE);
         decorView.post(() -> {
-            if (view.getTag() == null) return; // was cancelled by removeFromWindow
-            addToWindowNow(activity, view, width, height, x, y);
+            if (view.getTag() == null) return;
+            addToWindowNow(activity, view, width, height, x, y, focusable);
         });
     }
 
-    private void addToWindowNow(Activity activity, View view, int width, int height, int x, int y) {
+    private void addToWindowNow(Activity activity, View view, int width, int height, int x, int y, boolean focusable) {
         if (view.getParent() != null) return;
 
         // Strategy 1: Try TYPE_APPLICATION_OVERLAY first (above Dialogs)
         // Don't check canDrawOverlays() - MIUI and some ROMs return false even when granted
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             try {
+                int flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL;
+                if (!focusable) {
+                    flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH;
+                }
                 WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                         width, height,
                         WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                                | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                                | WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                        flags,
                         PixelFormat.TRANSLUCENT
                 );
                 params.gravity = Gravity.TOP | Gravity.START;
@@ -372,12 +374,15 @@ public class FloatingMenuManager {
 
         // Strategy 2: TYPE_APPLICATION_PANEL with activity token
         try {
+            int flags2 = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL;
+            if (!focusable) {
+                flags2 |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH;
+            }
             WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                     width, height,
                     WindowManager.LayoutParams.TYPE_APPLICATION_PANEL,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                            | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                            | WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                    flags2,
                     PixelFormat.TRANSLUCENT
             );
             params.gravity = Gravity.TOP | Gravity.START;
