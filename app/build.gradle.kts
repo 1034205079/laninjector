@@ -11,6 +11,15 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = rootProject.file("signkey/sxf199655.jks")
+            storePassword = "sxf199655"
+            keyAlias = "sxf199655"
+            keyPassword = "sxf199655"
+        }
+    }
+
     defaultConfig {
         applicationId = "com.baozi.laninjector"
         minSdk = 24
@@ -23,11 +32,13 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
@@ -69,9 +80,10 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
 
-// Ensure payload.dex is generated before merging assets
+// Ensure payload.dex is generated before any task that reads assets
+val payloadDexTask = ":payload:generatePayloadDex"
 tasks.configureEach {
-    if (name.contains("mergeDebugAssets") || name.contains("mergeReleaseAssets")) {
-        dependsOn(":payload:generatePayloadDex")
+    if (name.contains("Assets") || name.contains("Lint") || name.contains("lint")) {
+        dependsOn(payloadDexTask)
     }
 }

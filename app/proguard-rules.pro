@@ -19,3 +19,15 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Keep apksig library (used for runtime APK signing)
+-keep class com.android.apksig.** { *; }
+
+# Keep smali/dexlib2 (used for DEX manipulation)
+-keep class com.android.tools.smali.** { *; }
+
+# Keep Bouncy Castle / security providers used by apksig
+-keep class org.bouncycastle.** { *; }
+-keep class sun.security.** { *; }
+-dontwarn sun.security.**
+-dontwarn org.bouncycastle.**
