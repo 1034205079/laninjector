@@ -154,14 +154,8 @@ class ApkAnalyzer(private val context: Context) {
                             val country0 = arscBytes[configOffset + 10].toInt() and 0xFF
                             val country1 = arscBytes[configOffset + 11].toInt() and 0xFF
 
-                            if (lang0 in 0x61..0x7A && lang1 in 0x61..0x7A) { // lowercase a-z
-                                val lang = "${lang0.toChar()}${lang1.toChar()}"
-                                if (country0 in 0x41..0x5A && country1 in 0x41..0x5A) { // uppercase A-Z
-                                    locales.add("$lang-r${country0.toChar()}${country1.toChar()}")
-                                } else if (country0 == 0 && country1 == 0) {
-                                    locales.add(lang)
-                                }
-                            }
+                            val locale = unpackLocale(lang0, lang1, country0, country1)
+                            if (locale != null) locales.add(locale)
                         }
                     }
                     pos += chunkSize
@@ -184,15 +178,65 @@ class ApkAnalyzer(private val context: Context) {
             }
         }
 
-        Log.d(TAG, "ApkAnalyzer: found ${locales.size} locales from resources.arsc: $locales")
-        return locales.sorted()
+        // Normalize legacy Android locale codes to their modern BCP47 equivalents.
+        // Android's resource compiler stores "tl" (Tagalog) but modern tools (apktool, AAPT2)
+        // treat it as "fil" (Filipino). Android 5+ resolves both identically at runtime.
+        val normalized = locales.map { normalizeLocaleCode(it) }.toMutableSet()
+
+        Log.d(TAG, "ApkAnalyzer: found ${normalized.size} locales from resources.arsc: $normalized")
+        return normalized.sorted()
+    }
+
+    /**
+     * Normalize legacy Android resource locale qualifiers to modern BCP47 codes.
+     * "tl" → "fil": resources.arsc uses old Tagalog code; apktool and Android 5+ use "fil".
+     */
+    private fun normalizeLocaleCode(locale: String): String {
+        val lang = if (locale.contains("-")) locale.substringBefore("-") else locale
+        val normalized = when (lang) {
+            "tl" -> "fil"
+            else -> lang
+        }
+        return if (locale.contains("-")) "$normalized-${locale.substringAfter("-")}" else normalized
+    }
+
+    /**
+     * Unpack a ResTable_config language/country pair into an Android locale qualifier string.
+     * Handles both 2-letter ISO 639-1 codes and packed 3-letter ISO 639-2/3 codes.
+     *
+     * Android packs 3-letter codes as:
+     *   out[0] = 0x80 | (c0 << 2) | (c1 >> 3)
+     *   out[1] = (c1 << 5) | c2
+     * where c0/c1/c2 are (letter - 'a') & 0x1F
+     */
+    private fun unpackLocale(lang0: Int, lang1: Int, country0: Int, country1: Int): String? {
+        if (lang0 == 0 && lang1 == 0) return null
+
+        val lang = if (lang0 and 0x80 != 0) {
+            // Packed 3-letter code
+            val a = (lang0 shr 2) and 0x1F
+            val b = ((lang0 and 0x03) shl 3) or ((lang1 shr 5) and 0x07)
+            val c = lang1 and 0x1F
+            if (a !in 0..25 || b !in 0..25 || c !in 0..25) return null
+            "${('a' + a)}${('a' + b)}${('a' + c)}"
+        } else if (lang0 in 0x61..0x7A && lang1 in 0x61..0x7A) {
+            "${lang0.toChar()}${lang1.toChar()}"
+        } else {
+            return null
+        }
+
+        return if (country0 in 0x41..0x5A && country1 in 0x41..0x5A) {
+            "$lang-r${country0.toChar()}${country1.toChar()}"
+        } else {
+            lang
+        }
     }
 
     /**
      * Fallback: detect locales from res/values-* directory entries.
      */
     private fun detectLocalesFromEntries(entries: List<String>): List<String> {
-        val localePattern = Regex("res/values-([a-z]{2}(-r[A-Z]{2})?)/.*")
+        val localePattern = Regex("res/values-([a-z]{2,3}(-r[A-Z]{2})?)/.*")
         val locales = mutableSetOf<String>()
 
         for (entry in entries) {
@@ -202,7 +246,7 @@ class ApkAnalyzer(private val context: Context) {
             }
         }
 
-        return locales.sorted()
+        return locales.map { normalizeLocaleCode(it) }.toSet().sorted()
     }
 
     private fun readShortLE(data: ByteArray, pos: Int): Int {

@@ -1,9 +1,12 @@
 package com.baozi.laninjector.payload;
 
+import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.util.TypedValue;
@@ -17,7 +20,10 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -187,6 +193,19 @@ public class LanguagePanelView extends LinearLayout {
             }
         });
 
+        // File picker button (above Start)
+        Button loadBtn = new Button(getContext());
+        loadBtn.setText("选择文件来勾选语言");
+        loadBtn.setBackgroundColor(0xFFE8EAF6);
+        loadBtn.setTextColor(0xFF3949AB);
+        loadBtn.setAllCaps(false);
+        loadBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        LinearLayout.LayoutParams loadBtnLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        loadBtnLp.setMargins(0, dp(8), 0, dp(4));
+        loadBtn.setOnClickListener(v -> importFromFile());
+        addView(loadBtn, loadBtnLp);
+
         // Start button
         Button startBtn = new Button(getContext());
         startBtn.setText("Start");
@@ -239,6 +258,126 @@ public class LanguagePanelView extends LinearLayout {
             }
         }
         return selected;
+    }
+
+    /** Open system file picker to let the user choose a txt file. */
+    private void importFromFile() {
+        Context ctx = getContext();
+        Activity activity = null;
+        while (ctx instanceof android.content.ContextWrapper) {
+            if (ctx instanceof Activity) { activity = (Activity) ctx; break; }
+            ctx = ((android.content.ContextWrapper) ctx).getBaseContext();
+        }
+        if (activity == null) {
+            Toast.makeText(getContext(), "Cannot open file picker", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final Activity act = activity;
+        FilePickerFragment.attach(act, uri -> {
+            try {
+                List<String> codes = new ArrayList<>();
+                BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(act.getContentResolver().openInputStream(uri)));
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    line = line.trim().toLowerCase();
+                    if (!line.isEmpty()) codes.add(line);
+                }
+                reader.close();
+                if (codes.isEmpty()) {
+                    Toast.makeText(getContext(), "File is empty", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                applyLocaleCodes(codes);
+            } catch (Exception e) {
+                Toast.makeText(getContext(), "Failed to read file: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            }
+        }).launch();
+    }
+
+    /** Headless fragment used to start ACTION_GET_CONTENT and receive the result. */
+    @SuppressWarnings("deprecation")
+    public static class FilePickerFragment extends android.app.Fragment {
+        private static final int REQUEST_CODE = 0x4C49; // "LI"
+        private static final String TAG = "_laninjector_picker";
+
+        interface Callback { void onPicked(Uri uri); }
+        private Callback callback;
+
+        static FilePickerFragment attach(Activity activity, Callback cb) {
+            android.app.FragmentManager fm = activity.getFragmentManager();
+            FilePickerFragment f = (FilePickerFragment) fm.findFragmentByTag(TAG);
+            if (f == null) {
+                f = new FilePickerFragment();
+                fm.beginTransaction().add(f, TAG).commitAllowingStateLoss();
+                fm.executePendingTransactions();
+            }
+            f.callback = cb;
+            return f;
+        }
+
+        void launch() {
+            Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+            intent.setType("text/plain");
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            startActivityForResult(Intent.createChooser(intent, "Select locale file"), REQUEST_CODE);
+        }
+
+        @Override
+        public void onActivityResult(int requestCode, int resultCode, Intent data) {
+            if (requestCode == REQUEST_CODE && resultCode == Activity.RESULT_OK
+                    && data != null && data.getData() != null && callback != null) {
+                callback.onPicked(data.getData());
+            }
+        }
+    }
+
+    /**
+     * Uncheck all, then select locales matching any code in the list.
+     * Supports 2-letter (ja, ko) and 3-letter (jpn, kor, eng) ISO codes, case-insensitive.
+     * Matches all region variants: "zh" matches zh, zh-rCN, zh-rTW, etc.
+     */
+    private void applyLocaleCodes(List<String> inputCodes) {
+        for (CheckBox cb : checkBoxes) cb.setChecked(false);
+        int matched = 0;
+        for (int i = 0; i < localeCodes.size(); i++) {
+            for (String inputCode : inputCodes) {
+                if (localeMatchesCode(localeCodes.get(i), inputCode)) {
+                    if (!checkBoxes.get(i).isChecked()) {
+                        checkBoxes.get(i).setChecked(true);
+                        matched++;
+                    }
+                    break;
+                }
+            }
+        }
+        updateSelectAllState();
+        Toast.makeText(getContext(), matched + " language(s) selected", Toast.LENGTH_SHORT).show();
+    }
+
+    /**
+     * Check if a locale code exactly matches a user-provided code (case-insensitive).
+     * "bn" matches only "bn", not "bn-rIN" or "bn-rBD".
+     * Also supports ISO 639-2 three-letter codes and the fil/tl alias.
+     */
+    private boolean localeMatchesCode(String localeCode, String inputCode) {
+        localeCode = localeCode.toLowerCase();
+        inputCode = inputCode.toLowerCase();
+
+        if (localeCode.equals(inputCode)) return true;
+
+        // Try ISO 639-2 three-letter code: "ben" matches "bn"
+        try {
+            java.util.Locale l = new java.util.Locale(localeCode);
+            String iso3 = l.getISO3Language();
+            if (iso3 != null && !iso3.isEmpty() && iso3.equals(inputCode)) return true;
+        } catch (Exception ignored) {}
+
+        // fil (Filipino/BCP47) ↔ tl (Tagalog/legacy Android code)
+        if ("fil".equals(inputCode) && "tl".equals(localeCode)) return true;
+        if ("tl".equals(inputCode) && "fil".equals(localeCode)) return true;
+
+        return false;
     }
 
     private int dp(int value) {

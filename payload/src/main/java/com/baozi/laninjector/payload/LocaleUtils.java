@@ -28,6 +28,7 @@ public class LocaleUtils {
         FALLBACK_NAMES.put("eu", "Euskara");
         FALLBACK_NAMES.put("fa", "\u0641\u0627\u0631\u0633\u06CC");
         FALLBACK_NAMES.put("fi", "Suomi");
+        FALLBACK_NAMES.put("fil", "Filipino");
         FALLBACK_NAMES.put("fr", "Fran\u00E7ais");
         FALLBACK_NAMES.put("gl", "Galego");
         FALLBACK_NAMES.put("gu", "\u0A97\u0AC1\u0A9C\u0AB0\u0ABE\u0AA4\u0AC0");
@@ -86,11 +87,20 @@ public class LocaleUtils {
 
     /**
      * Parse a locale qualifier string like "ja", "zh-rCN", "pt-rBR" into a Locale.
+     * "fil" is normalized to use Locale.forLanguageTag for correct BCP47 handling.
      */
     public static Locale parseLocaleQualifier(String qualifier) {
         if (qualifier.contains("-r")) {
             String[] parts = qualifier.split("-r");
             return new Locale(parts[0], parts[1]);
+        }
+        // Use forLanguageTag for 3-letter BCP47 codes like "fil" so the OS
+        // correctly resolves them (Android 5+ maps "fil" ↔ "tl" internally).
+        if (qualifier.length() == 3 && qualifier.matches("[a-z]{3}")) {
+            try {
+                Locale l = Locale.forLanguageTag(qualifier);
+                if (!l.getLanguage().isEmpty()) return l;
+            } catch (Exception ignored) {}
         }
         return new Locale(qualifier);
     }

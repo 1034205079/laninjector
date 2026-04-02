@@ -31,7 +31,10 @@
       "WebFetch(domain:fontawesomeicons.com)",
       "WebFetch(domain:igoutu.cn)",
       "Read(//c/Users/songxiaofei/Desktop/**)",
-      "Read(//mnt/c/Users/songxiaofei/**)"
+      "Read(//mnt/c/Users/songxiaofei/**)",
+      "Bash(python3:*)",
+      "Bash(python:*)",
+      "Bash(git checkout:*)"
     ]
   }
 }
