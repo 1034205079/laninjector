@@ -36,6 +36,7 @@ public class PayloadInit {
         Log.d(TAG, "Loaded " + locales.length + " locales from " + LOCALES_FILE);
 
         final Application app = (Application) context.getApplicationContext();
+        ResourceStringIndex.warm(app);
         final ActivityTracker tracker = new ActivityTracker();
         app.registerActivityLifecycleCallbacks(tracker);
         Log.d(TAG, "ActivityTracker registered, waiting for first Activity...");
@@ -50,7 +51,6 @@ public class PayloadInit {
                 if (!ballCreated) {
                     ballCreated = true;
                     // Seed the tracker with the first activity
-                    tracker.onActivityResumed(activity);
                     Log.d(TAG, "First Activity resumed: " + activity.getClass().getSimpleName());
                     FloatingMenuManager manager = new FloatingMenuManager(activity, locales, tracker);
                     manager.show();

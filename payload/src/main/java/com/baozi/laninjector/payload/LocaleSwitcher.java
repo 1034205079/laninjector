@@ -26,20 +26,14 @@ public class LocaleSwitcher {
 
     @SuppressWarnings("deprecation")
     public static void switchLocale(Activity activity, String localeCode) {
+        ResourceStringIndex.warm(activity);
         Log.d(TAG, "switchLocale: " + localeCode + " on " + activity.getClass().getSimpleName());
 
         String languageTag = localeCode.replace("-r", "-");
         Locale locale = LocaleUtils.parseLocaleQualifier(localeCode);
+        LiveWindowLocaleRefresh refresh = LiveWindowLocaleRefresh.capture(activity);
 
-        // Strategy 1: Android 13+ framework LocaleManager (helps apps that respect system locale)
-        if (Build.VERSION.SDK_INT >= 33) {
-            if (tryFrameworkLocaleManager(activity, languageTag)) {
-                Log.d(TAG, "LocaleManager set: " + languageTag);
-            }
-            // Don't return — also apply Strategy 2 for apps that ignore LocaleManager
-        }
-
-        // Strategy 2: Direct Resources override + lifecycle callback + recreate
+        // Update the existing windows without asking Android to relaunch the Activity.
         // Works for apps with their own language management that ignores LocaleManager
         saveTargetLocale(activity, languageTag);
         registerLocaleOverride(activity.getApplication(), locale);
@@ -50,6 +44,7 @@ public class LocaleSwitcher {
         // Update resources
         forceUpdateResources(activity, locale);
         forceUpdateResources(activity.getApplicationContext(), locale);
+        refresh.updateResources(locale);
 
         if (isFlutterActivity(activity)) {
             // Flutter apps: recreate() would restart the Flutter engine and show splash.
@@ -58,9 +53,21 @@ public class LocaleSwitcher {
             Log.d(TAG, "Flutter app detected, dispatching onConfigurationChanged instead of recreate()");
             notifyFlutterConfigChanged(activity, locale);
         } else {
-            Log.d(TAG, "Locale set to " + locale + ", calling recreate()");
-            activity.recreate();
+            // Do not call LocaleManager or recreate(): both can destroy open dialogs.
+            Configuration config = new Configuration(activity.getResources().getConfiguration());
+            config.setLocale(locale);
+            config.setLocales(new LocaleList(locale));
+            refresh.dispatchConfiguration(config);
         }
+        int changed = refresh.refreshText();
+        if (changed == 0 && !isFlutterActivity(activity)) {
+            Log.w(TAG, "No visible text changed for " + localeCode
+                    + "; translations may be missing or labels are not backed by Android string resources");
+            android.widget.Toast.makeText(activity,
+                    "No visible translation changed. Check app language resources.",
+                    android.widget.Toast.LENGTH_SHORT).show();
+        }
+        Log.d(TAG, "Locale switched in place: " + locale + "; existing windows retained");
     }
 
     /** Check if the activity is a Flutter activity by walking the class hierarchy */
@@ -352,22 +359,4 @@ public class LocaleSwitcher {
 
     // ===== Strategy implementations =====
 
-    private static boolean tryFrameworkLocaleManager(Activity activity, String languageTag) {
-        try {
-            Object localeManager = activity.getSystemService(
-                    (Class<?>) Class.forName("android.app.LocaleManager"));
-            if (localeManager == null) return false;
-
-            LocaleList localeList = LocaleList.forLanguageTags(languageTag);
-            Method setLocales = localeManager.getClass().getMethod(
-                    "setApplicationLocales", LocaleList.class);
-            setLocales.invoke(localeManager, localeList);
-
-            Log.d(TAG, "Framework LocaleManager: set " + languageTag);
-            return true;
-        } catch (Exception e) {
-            Log.d(TAG, "Framework LocaleManager failed: " + e.getMessage());
-            return false;
-        }
-    }
 }

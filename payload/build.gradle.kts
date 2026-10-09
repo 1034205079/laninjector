@@ -19,8 +19,17 @@ fun getSdkDir(): String {
         ?: throw GradleException("Android SDK not found. Set sdk.dir in local.properties or ANDROID_HOME env var.")
 }
 
+// Match the app module's compileSdk (API 36, minor API level 1).
+val androidJar = file("${getSdkDir()}/platforms/android-36.1/android.jar")
+if (!androidJar.isFile) {
+    throw GradleException(
+        "Android SDK Platform 36.1 not found at $androidJar. " +
+            "Install it using Android Studio's SDK Manager or check sdk.dir in local.properties."
+    )
+}
+
 dependencies {
-    compileOnly(files("${getSdkDir()}/platforms/android-36/android.jar"))
+    compileOnly(files(androidJar))
 }
 
 tasks.register("generatePayloadDex") {
