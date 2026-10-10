@@ -2,6 +2,8 @@ package com.baozi.laninjector.injection
 
 import android.content.Context
 import android.util.Log
+import android.util.AtomicFile
+import java.security.MessageDigest
 import com.baozi.laninjector.model.SigningConfig
 import java.io.File
 import java.io.FileOutputStream
@@ -16,6 +18,7 @@ import javax.security.auth.x500.X500Principal
 class KeyStoreManager(private val context: Context) {
 
     companion object {
+        private val keyLock = Any()
         private const val TAG = "LanInjector"
         private const val KEYSTORE_FILE = "debug.keystore"
         private const val KEYSTORE_PASSWORD = "android"
@@ -28,28 +31,35 @@ class KeyStoreManager(private val context: Context) {
         val certificate: X509Certificate
     )
 
-    fun getSigningKey(config: SigningConfig = SigningConfig()): SigningKey {
+    fun getSigningKey(config: SigningConfig = SigningConfig()): SigningKey = synchronized(keyLock) {
         Log.d(TAG, "KeyStoreManager: useCustom=${config.useCustom}, selectedId=${config.selectedId}, entries=${config.entries.size}")
         val entry = if (config.useCustom) config.selectedEntry else null
         if (entry != null && !entry.keystorePath.isNullOrEmpty()) {
             Log.d(TAG, "KeyStoreManager: using custom keystore '${entry.name}', path=${entry.keystorePath}, alias=${entry.keyAlias}")
-            return loadCustomKey(entry)
+            return@synchronized reportKey(loadCustomKey(entry))
         }
 
         if (config.useCustom) {
-            Log.w(TAG, "KeyStoreManager: custom enabled but no valid entry found, falling back to debug")
+            error("自定义签名密钥未选择或已失效，请重新选择密钥，避免签名身份发生变化")
         }
 
         val ksFile = File(context.filesDir, KEYSTORE_FILE)
         Log.d(TAG, "KeyStoreManager: keystore exists=${ksFile.exists()}")
 
-        if (ksFile.exists()) {
+        if (ksFile.exists() || File(ksFile.path + ".bak").exists()) {
             Log.d(TAG, "KeyStoreManager: loading existing keystore")
-            return loadKey(ksFile)
+            return@synchronized reportKey(loadKey(ksFile))
         }
 
         Log.d(TAG, "KeyStoreManager: generating new keystore")
-        return generateKey(ksFile)
+        reportKey(generateKey(ksFile))
+    }
+
+    private fun reportKey(key: SigningKey): SigningKey {
+        val fingerprint = MessageDigest.getInstance("SHA-256").digest(key.certificate.encoded)
+            .joinToString(":") { "%02X".format(it.toInt() and 255) }
+        Log.i(TAG, "Signing certificate SHA-256: $fingerprint")
+        return key
     }
 
     private fun loadCustomKey(entry: com.baozi.laninjector.model.SigningEntry): SigningKey {
@@ -82,7 +92,7 @@ class KeyStoreManager(private val context: Context) {
 
     private fun loadKey(ksFile: File): SigningKey {
         val ks = KeyStore.getInstance("PKCS12")
-        ksFile.inputStream().use { ks.load(it, KEYSTORE_PASSWORD.toCharArray()) }
+        AtomicFile(ksFile).openRead().use { ks.load(it, KEYSTORE_PASSWORD.toCharArray()) }
 
         val privateKey = ks.getKey(KEY_ALIAS, KEY_PASSWORD.toCharArray()) as PrivateKey
         val certificate = ks.getCertificate(KEY_ALIAS) as X509Certificate
@@ -116,7 +126,15 @@ class KeyStoreManager(private val context: Context) {
         ks.load(null, KEYSTORE_PASSWORD.toCharArray())
         ks.setKeyEntry(KEY_ALIAS, keyPair.private, KEY_PASSWORD.toCharArray(), arrayOf(certificate))
 
-        FileOutputStream(ksFile).use { ks.store(it, KEYSTORE_PASSWORD.toCharArray()) }
+        val file = AtomicFile(ksFile)
+        val output = file.startWrite()
+        try {
+            ks.store(output, KEYSTORE_PASSWORD.toCharArray())
+            file.finishWrite(output)
+        } catch (e: Exception) {
+            file.failWrite(output)
+            throw e
+        }
 
         return SigningKey(keyPair.private, certificate)
     }

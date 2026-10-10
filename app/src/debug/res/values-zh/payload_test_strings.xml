@@ -1,0 +1,4 @@
+<resources>
+    <string name="payload_test_hint">请输入…</string>
+    <string name="payload_test_minimum">最低提现金额为 %1$s</string>
+</resources>

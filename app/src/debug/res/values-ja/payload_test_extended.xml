@@ -1,0 +1,4 @@
+<resources>
+    <string-array name="payload_test_choices"><item>リンゴ</item><item>オレンジ</item></string-array>
+    <plurals name="payload_test_count"><item quantity="other">%1$d 件選択</item></plurals>
+</resources>

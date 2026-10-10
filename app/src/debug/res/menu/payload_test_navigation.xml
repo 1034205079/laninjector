@@ -1,0 +1,6 @@
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <group android:checkableBehavior="single">
+        <item android:id="@+id/payload_test_nav_home" android:title="@android:string/ok" />
+        <item android:id="@+id/payload_test_nav_profile" android:title="@android:string/cancel" />
+    </group>
+</menu>

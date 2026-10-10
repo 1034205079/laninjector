@@ -1,0 +1,7 @@
+<resources>
+    <string-array name="payload_test_choices"><item>Apples</item><item>Oranges</item></string-array>
+    <plurals name="payload_test_count">
+        <item quantity="one">%1$d selected item</item><item quantity="other">%1$d selected items</item>
+    </plurals>
+    <style name="PayloadTestText"><item name="android:text">@string/payload_test_hint</item><item name="android:textColor">#123456</item></style>
+</resources>

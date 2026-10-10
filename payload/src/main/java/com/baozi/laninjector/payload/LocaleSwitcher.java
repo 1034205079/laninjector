@@ -26,12 +26,14 @@ public class LocaleSwitcher {
 
     @SuppressWarnings("deprecation")
     public static void switchLocale(Activity activity, String localeCode) {
+        long perfStart = android.os.SystemClock.elapsedRealtime();
         ResourceStringIndex.warm(activity);
         Log.d(TAG, "switchLocale: " + localeCode + " on " + activity.getClass().getSimpleName());
 
-        String languageTag = localeCode.replace("-r", "-");
         Locale locale = LocaleUtils.parseLocaleQualifier(localeCode);
+        String languageTag = locale.toLanguageTag();
         LiveWindowLocaleRefresh refresh = LiveWindowLocaleRefresh.capture(activity);
+        long perfCaptured = android.os.SystemClock.elapsedRealtime();
 
         // Update the existing windows without asking Android to relaunch the Activity.
         // Works for apps with their own language management that ignores LocaleManager
@@ -45,6 +47,7 @@ public class LocaleSwitcher {
         forceUpdateResources(activity, locale);
         forceUpdateResources(activity.getApplicationContext(), locale);
         refresh.updateResources(locale);
+        long perfResources = android.os.SystemClock.elapsedRealtime();
 
         if (isFlutterActivity(activity)) {
             // Flutter apps: recreate() would restart the Flutter engine and show splash.
@@ -59,7 +62,12 @@ public class LocaleSwitcher {
             config.setLocales(new LocaleList(locale));
             refresh.dispatchConfiguration(config);
         }
+        long perfDispatched = android.os.SystemClock.elapsedRealtime();
         int changed = refresh.refreshText();
+        long perfEnd = android.os.SystemClock.elapsedRealtime();
+        Log.i(TAG, "LocalePerf switch: locale=" + languageTag + " totalMs=" + (perfEnd - perfStart)
+                + " captureMs=" + (perfCaptured - perfStart) + " resourcesMs=" + (perfResources - perfCaptured)
+                + " dispatchMs=" + (perfDispatched - perfResources) + " refreshMs=" + (perfEnd - perfDispatched));
         if (changed == 0 && !isFlutterActivity(activity)) {
             Log.w(TAG, "No visible text changed for " + localeCode
                     + "; translations may be missing or labels are not backed by Android string resources");

@@ -1,0 +1,4 @@
+<resources>
+    <string name="payload_test_hint">入力してください…</string>
+    <string name="payload_test_minimum">最低金額は%1$sです</string>
+</resources>

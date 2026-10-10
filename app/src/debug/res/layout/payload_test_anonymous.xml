@@ -1,0 +1,4 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/payload_test_anchor" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+<View android:id="@+id/payload_test_anchor_child" android:layout_width="1dp" android:layout_height="1dp" />
+<TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/payload_test_anonymous" />
+</LinearLayout>

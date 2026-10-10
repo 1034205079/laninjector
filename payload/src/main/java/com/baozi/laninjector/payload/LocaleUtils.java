@@ -90,9 +90,15 @@ public class LocaleUtils {
      * "fil" is normalized to use Locale.forLanguageTag for correct BCP47 handling.
      */
     public static Locale parseLocaleQualifier(String qualifier) {
+        if (qualifier.startsWith("b+")) {
+            return Locale.forLanguageTag(qualifier.substring(2).replace('+', '-'));
+        }
         if (qualifier.contains("-r")) {
             String[] parts = qualifier.split("-r");
             return new Locale(parts[0], parts[1]);
+        }
+        if (qualifier.contains("-") || qualifier.contains("_")) {
+            return Locale.forLanguageTag(qualifier.replace('_', '-'));
         }
         // Use forLanguageTag for 3-letter BCP47 codes like "fil" so the OS
         // correctly resolves them (Android 5+ maps "fil" ↔ "tl" internally).

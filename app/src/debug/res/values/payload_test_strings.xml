@@ -1,0 +1,4 @@
+<resources>
+    <string name="payload_test_hint">Please enter…</string>
+    <string name="payload_test_minimum">Minimum amount is %1$s</string>
+</resources>
