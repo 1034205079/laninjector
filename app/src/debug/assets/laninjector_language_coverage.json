@@ -1,0 +1,1 @@
+{"version":1,"basis":"回归测试样本","threshold":80,"defaults":["ja"],"languages":[{"locale":"ja","translated":8,"total":10,"percent":80,"recommended":true},{"locale":"ko","translated":2,"total":10,"percent":20,"recommended":false}]}

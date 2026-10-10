@@ -26,6 +26,111 @@ import static org.junit.Assert.*;
 
 @RunWith(AndroidJUnit4.class)
 public class PayloadRegressionTest {
+    @Test public void languageArrowsGoBackwardAndForwardAndDraggingDoesNotSwitch() {
+        ActivityTracker tracker = new ActivityTracker();
+        AtomicReference<FloatingMenuManager> manager = new AtomicReference<>();
+        try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
+            scenario.onActivity(activity -> {
+                tracker.onActivityStarted(activity); tracker.onActivityResumed(activity);
+                FloatingMenuManager menu = new FloatingMenuManager(activity, new String[]{"en", "ja"}, tracker);
+                manager.set(menu);
+                try {
+                    java.lang.reflect.Method start = FloatingMenuManager.class.getDeclaredMethod("startCycling", java.util.List.class);
+                    start.setAccessible(true); start.invoke(menu, java.util.Arrays.asList("en", "ja"));
+                } catch (Exception e) { throw new AssertionError(e); }
+            });
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+            scenario.onActivity(activity -> {
+                FloatingBallView ball = (FloatingBallView) getBall(manager.get());
+                assertTrue(ball.getWidth() > 0);
+                tapBall(ball, ball.getWidth() * .25f);
+                assertEquals(LocaleUtils.formatForDisplay("ja"), ball.getDisplayText());
+                tapBall(ball, ball.getWidth() * .75f);
+                assertEquals(LocaleUtils.formatForDisplay("en"), ball.getDisplayText());
+                long now = android.os.SystemClock.uptimeMillis();
+                android.view.MotionEvent down = android.view.MotionEvent.obtain(now, now, 0, 20, 20, 0);
+                android.view.MotionEvent move = android.view.MotionEvent.obtain(now, now + 20, 2, 60, 20, 0);
+                android.view.MotionEvent up = android.view.MotionEvent.obtain(now, now + 30, 1, 60, 20, 0);
+                try { ball.onTouchEvent(down); ball.onTouchEvent(move); ball.onTouchEvent(up); }
+                finally { down.recycle(); move.recycle(); up.recycle(); }
+                assertEquals(LocaleUtils.formatForDisplay("en"), ball.getDisplayText());
+                try {
+                    java.lang.reflect.Method reset = FloatingMenuManager.class.getDeclaredMethod("resetToIdle");
+                    reset.setAccessible(true); reset.invoke(manager.get());
+                } catch (Exception e) { throw new AssertionError(e); }
+                tracker.onActivityStopped(activity);
+            });
+        }
+    }
+
+    private void tapBall(FloatingBallView ball, float x) {
+        long now = android.os.SystemClock.uptimeMillis();
+        android.view.MotionEvent down = android.view.MotionEvent.obtain(now, now, 0, x, ball.getHeight() * .75f, 0);
+        android.view.MotionEvent up = android.view.MotionEvent.obtain(now, now + 10, 1, x, ball.getHeight() * .75f, 0);
+        try { ball.onTouchEvent(down); ball.onTouchEvent(up); } finally { down.recycle(); up.recycle(); }
+    }
+
+    @Test public void rtlLanguageReturnsToLtrWithoutClosingDialogOrChangingExplicitDirection() {
+        AtomicReference<Dialog> dialogRef = new AtomicReference<>();
+        AtomicReference<LinearLayout> contentRef = new AtomicReference<>();
+        AtomicReference<TextView> fixedRef = new AtomicReference<>();
+        AtomicReference<EditText> inputRef = new AtomicReference<>();
+        try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
+            scenario.onActivity(activity -> {
+                LinearLayout content = new LinearLayout(activity); content.setOrientation(LinearLayout.VERTICAL);
+                TextView fixed = new TextView(activity); fixed.setLayoutDirection(View.LAYOUT_DIRECTION_LTR); fixed.setText("Fixed LTR");
+                EditText input = new EditText(activity); input.setText("Keep input 123");
+                content.addView(fixed); content.addView(input);
+                Dialog dialog = new Dialog(activity); dialog.setContentView(content); dialog.show();
+                dialogRef.set(dialog); contentRef.set(content); fixedRef.set(fixed); inputRef.set(input);
+            });
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+            scenario.onActivity(activity -> {
+                Dialog dialog = dialogRef.get();
+                try {
+                    for (String locale : new String[]{"ar", "en", "ar", "zh-rCN", "ar", "ja"}) {
+                        LocaleSwitcher.switchLocale(activity, locale);
+                        int expected = locale.equals("ar") ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR;
+                        assertEquals(expected, activity.getWindow().getDecorView().getLayoutDirection());
+                        assertEquals(expected, dialog.getWindow().getDecorView().getLayoutDirection());
+                        assertEquals(expected, contentRef.get().getLayoutDirection());
+                        assertEquals(View.LAYOUT_DIRECTION_LTR, fixedRef.get().getLayoutDirection());
+                        assertEquals("Keep input 123", inputRef.get().getText().toString());
+                        assertTrue(dialog.isShowing()); assertFalse(activity.isDestroyed());
+                    }
+                } finally { dialog.dismiss(); }
+            });
+        }
+    }
+
+    @Test public void languageRecommendationsDefaultSelectAndRememberManualChanges() {
+        main(() -> {
+            android.content.Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+            android.content.SharedPreferences prefs = context.getSharedPreferences("laninjector_language_selection", android.content.Context.MODE_PRIVATE);
+            java.util.Set<String> prior = prefs.contains("selected") ? new java.util.HashSet<>(prefs.getStringSet("selected", java.util.Collections.emptySet())) : null;
+            prefs.edit().remove("selected").commit();
+            try {
+                LanguagePanelView panel = new LanguagePanelView(context, new String[]{"ja", "ko"});
+                android.widget.ScrollView scroll = null;
+                for (int i = 0; i < panel.getChildCount(); i++) if (panel.getChildAt(i) instanceof android.widget.ScrollView) scroll = (android.widget.ScrollView) panel.getChildAt(i);
+                assertNotNull(scroll);
+                android.view.ViewGroup list = (android.view.ViewGroup) scroll.getChildAt(0);
+                assertTrue(((android.widget.CheckBox) list.getChildAt(0)).isChecked());
+                assertFalse(((android.widget.CheckBox) list.getChildAt(1)).isChecked());
+                ((android.widget.CheckBox) list.getChildAt(1)).setChecked(true);
+                LanguagePanelView reopened = new LanguagePanelView(context, new String[]{"ja", "ko"});
+                for (int i = 0; i < reopened.getChildCount(); i++) if (reopened.getChildAt(i) instanceof android.widget.ScrollView) {
+                    android.view.ViewGroup restored = (android.view.ViewGroup) ((android.widget.ScrollView) reopened.getChildAt(i)).getChildAt(0);
+                    assertTrue(((android.widget.CheckBox) restored.getChildAt(1)).isChecked());
+                }
+            } finally {
+                android.content.SharedPreferences.Editor edit = prefs.edit();
+                if (prior == null) edit.remove("selected"); else edit.putStringSet("selected", prior);
+                edit.commit();
+            }
+        });
+    }
+
     @Test public void anonymousLayoutLabelsUseExactResourceDespiteDuplicateText() throws Exception {
         android.content.Context app = InstrumentationRegistry.getInstrumentation().getTargetContext();
         ResourceStringIndex.warm(app);

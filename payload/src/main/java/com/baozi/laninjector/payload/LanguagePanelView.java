@@ -44,6 +44,25 @@ public class LanguagePanelView extends LinearLayout {
     private OnCloseCallback closeCallback;
     private CheckBox selectAllBox;
     private TextView countLabel;
+    private boolean applyingDefaults = true;
+    private org.json.JSONObject coverage;
+
+    private void saveSelection() {
+        getContext().getSharedPreferences("laninjector_language_selection", Context.MODE_PRIVATE)
+                .edit().putStringSet("selected", new java.util.HashSet<>(getSelectedLocales())).apply();
+    }
+
+    private void restoreDefaults() {
+        android.content.SharedPreferences preferences = getContext().getSharedPreferences("laninjector_language_selection", Context.MODE_PRIVATE);
+        java.util.Set<String> selected = preferences.contains("selected") ? preferences.getStringSet("selected", java.util.Collections.emptySet()) : null;
+        if (selected == null && coverage != null) {
+            selected = new java.util.HashSet<>();
+            org.json.JSONArray defaults = coverage.optJSONArray("defaults");
+            if (defaults != null) for (int i = 0; i < defaults.length(); i++) selected.add(defaults.optString(i));
+        }
+        if (selected != null) for (int i = 0; i < checkBoxes.size(); i++) checkBoxes.get(i).setChecked(selected.contains(localeCodes.get(i)));
+        updateSelectAllState();
+    }
 
     public LanguagePanelView(Context context, String[] locales) {
         super(context);
@@ -52,7 +71,16 @@ public class LanguagePanelView extends LinearLayout {
         int pad = dp(16);
         setPadding(pad, pad, pad, pad);
         setElevation(dp(8));
+        try (java.io.InputStream input = context.getAssets().open("laninjector_language_coverage.json")) {
+            java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+            byte[] bytes = new byte[4096]; int count;
+            while ((count = input.read(bytes)) != -1) output.write(bytes, 0, count);
+            coverage = new org.json.JSONObject(output.toString("UTF-8"));
+            if (coverage.optInt("version") != 1) coverage = null;
+        } catch (Exception ignored) { }
         buildUI(locales);
+        restoreDefaults();
+        applyingDefaults = false;
     }
 
     public void setStartCallback(OnStartCallback callback) {
@@ -95,6 +123,15 @@ public class LanguagePanelView extends LinearLayout {
         titleRow.addView(closeBtn);
 
         addView(titleRow);
+        if (coverage != null) {
+            TextView summary = new TextView(getContext());
+            summary.setText("语言覆盖率估算 · 默认推荐 ≥80%");
+            summary.setSingleLine(true);
+            summary.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            if (android.os.Build.VERSION.SDK_INT >= 26) summary.setTooltipText(coverage.optString("basis"));
+            summary.setTextColor(0xFF757575); summary.setTextSize(12);
+            addView(summary);
+        }
 
         // Search box with embedded clear button
         FrameLayout searchFrame = new FrameLayout(getContext());
@@ -162,11 +199,26 @@ public class LanguagePanelView extends LinearLayout {
             displayNames.add(name.toLowerCase());
 
             CheckBox cb = new CheckBox(getContext());
-            cb.setText(name);
+            String label = name;
+            if (coverage != null) {
+                org.json.JSONArray languages = coverage.optJSONArray("languages");
+                if (languages != null) for (int i = 0; i < languages.length(); i++) {
+                    org.json.JSONObject score = languages.optJSONObject(i);
+                    if (score != null && locale.equals(score.optString("locale"))) {
+                        boolean inherited = score.has("directTranslated") && score.optInt("directTranslated") == 0 && score.optInt("translated") > 0;
+                        label += " · " + score.optInt("percent") + "%" + (score.optBoolean("recommended") ? " 推荐" : inherited ? " 继承通用语言" : " 需确认");
+                        break;
+                    }
+                }
+            }
+            cb.setText(label);
             cb.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
             cb.setTextColor(0xFF616161);
             cb.setPadding(dp(4), dp(2), dp(4), dp(2));
-            cb.setOnCheckedChangeListener((buttonView, isChecked) -> updateSelectAllState());
+            cb.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                updateSelectAllState();
+                if (!applyingDefaults) saveSelection();
+            });
             checkBoxes.add(cb);
             listContainer.addView(cb);
         }
@@ -193,18 +245,31 @@ public class LanguagePanelView extends LinearLayout {
             }
         });
 
-        // File picker button (above Start)
+        // Keep secondary actions in one row so the language list retains space.
+        LinearLayout actions = new LinearLayout(getContext());
+        actions.setOrientation(HORIZONTAL);
+        LinearLayout.LayoutParams actionsLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44));
+        actionsLp.setMargins(0, dp(4), 0, 0);
+        addView(actions, actionsLp);
         Button loadBtn = new Button(getContext());
-        loadBtn.setText("选择文件来勾选语言");
+        loadBtn.setText("导入语言文件");
         loadBtn.setBackgroundColor(0xFFE8EAF6);
         loadBtn.setTextColor(0xFF3949AB);
         loadBtn.setAllCaps(false);
         loadBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        LinearLayout.LayoutParams loadBtnLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        loadBtnLp.setMargins(0, dp(8), 0, dp(4));
+        LinearLayout.LayoutParams loadBtnLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
         loadBtn.setOnClickListener(v -> importFromFile());
-        addView(loadBtn, loadBtnLp);
+        actions.addView(loadBtn, loadBtnLp);
+        if (coverage != null) {
+            Button recommended = new Button(getContext());
+            recommended.setText("恢复默认选择"); recommended.setAllCaps(false);
+            recommended.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+            recommended.setOnClickListener(v -> {
+                getContext().getSharedPreferences("laninjector_language_selection", Context.MODE_PRIVATE).edit().remove("selected").apply();
+                applyingDefaults = true; restoreDefaults(); applyingDefaults = false;
+            });
+            actions.addView(recommended, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
+        }
 
         // Start button
         Button startBtn = new Button(getContext());

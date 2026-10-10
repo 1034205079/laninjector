@@ -224,8 +224,15 @@ final class LiveWindowLocaleRefresh {
 
     void dispatchConfiguration(Configuration config) {
         for (View root : roots) {
+            if (root instanceof FloatingBallView || root instanceof LanguagePanelView) continue;
             try {
                 root.dispatchConfigurationChanged(config);
+                // Updating Resources alone does not invalidate a window's resolved
+                // RTL direction. Change the root so inherited child directions and
+                // start/end margins are resolved again in both directions.
+                int previousDirection = root.getLayoutDirection();
+                root.setLayoutDirection(config.getLayoutDirection());
+                Log.d(TAG, "Window layout direction: " + previousDirection + " -> " + root.getLayoutDirection());
                 root.requestLayout();
                 root.invalidate();
             } catch (Exception e) {

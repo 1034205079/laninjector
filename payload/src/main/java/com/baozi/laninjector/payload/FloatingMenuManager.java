@@ -145,6 +145,7 @@ public class FloatingMenuManager {
         ballView.setDisplayText("Start");
         ballView.setShowArrow(false);
         ballView.setClickCallback(this::onBallClicked);
+        ballView.setPreviousCallback(this::switchToPrevious);
 
         ballView.setDragListener((dx, dy) -> {
             ballX += (int) dx;
@@ -242,6 +243,7 @@ public class FloatingMenuManager {
         ballView.setBallColor(currentColor);
         ballView.setShowArrow(currentArrow);
         ballView.setClickCallback(this::onBallClicked);
+        ballView.setPreviousCallback(this::switchToPrevious);
         ballView.setDragListener((dx, dy) -> {
             ballX += (int) dx;
             ballY += (int) dy;
@@ -303,8 +305,8 @@ public class FloatingMenuManager {
 
     private void attachPanel(Activity activity) {
         DisplayMetrics dm = activity.getResources().getDisplayMetrics();
-        int panelWidth = Math.min(dpToPx(activity, 300), dm.widthPixels - dpToPx(activity, 32));
-        int panelHeight = Math.min(dpToPx(activity, 400), dm.heightPixels - dpToPx(activity, 100));
+        int panelWidth = Math.min(dpToPx(activity, 360), dm.widthPixels - dpToPx(activity, 24));
+        int panelHeight = Math.min(dpToPx(activity, 620), dm.heightPixels - dpToPx(activity, 64));
 
         // Center the panel on screen
         int panelX = (dm.widthPixels - panelWidth) / 2;
@@ -354,7 +356,14 @@ public class FloatingMenuManager {
     }
 
     private void switchToNext() {
+        if (selectedLocales == null || selectedLocales.isEmpty()) return;
         currentIndex = (currentIndex + 1) % selectedLocales.size();
+        switchToCurrentLocale();
+    }
+
+    private void switchToPrevious() {
+        if (state != State.CYCLING || selectedLocales == null || selectedLocales.isEmpty()) return;
+        currentIndex = (currentIndex + selectedLocales.size() - 1) % selectedLocales.size();
         switchToCurrentLocale();
     }
 

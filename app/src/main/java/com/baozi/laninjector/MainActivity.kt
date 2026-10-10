@@ -64,12 +64,12 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                 },
-                                onInjectClick = {
+                                onInjectClick = { initialLocales ->
                                     if (pipeline.state.value is InjectionState.Idle) {
                                         selectedUri?.let { uri ->
                                             scope.launch {
                                                 try {
-                                                    pipeline.inject(uri, signingConfig)
+                                                    pipeline.inject(uri, signingConfig, initialLocales)
                                                 } catch (_: Exception) {
                                                 }
                                             }

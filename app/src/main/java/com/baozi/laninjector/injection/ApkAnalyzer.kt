@@ -22,11 +22,19 @@ class ApkAnalyzer(private val context: Context) {
         val entries = mutableListOf<String>()
         var dexCount = 0
         var isFlutter = false
+        val pageReferences = mutableSetOf<Int>()
 
         var entry = zipStream.nextEntry
         while (entry != null) {
             val name = entry.name
             entries.add(name)
+            if ((name.startsWith("res/layout") || name.startsWith("res/menu")) && name.endsWith(".xml")
+                && !LanguageCoverageAnalyzer.isLibraryResource(name.substringAfterLast('/'))) {
+                try {
+                    val xml = zipStream.readBytes()
+                    pageReferences.addAll(LanguageCoverageAnalyzer.xmlReferences(xml))
+                } catch (e: Exception) { Log.w(TAG, "Language coverage: XML references skipped in $name", e) }
+            }
 
             if (name == "AndroidManifest.xml") {
                 val baos = java.io.ByteArrayOutputStream()
@@ -62,7 +70,11 @@ class ApkAnalyzer(private val context: Context) {
         val manifestInfo = parseManifest(manifestBytes)
 
         // Detect locales: prefer resources.arsc, fallback to directory scanning
-        val locales = if (arscBytes != null) {
+        val coverage = arscBytes?.let {
+            try { LanguageCoverageAnalyzer().analyze(it, pageReferences, isFlutter) }
+            catch (e: Exception) { Log.w(TAG, "Language coverage unavailable; keeping manual selection", e); null }
+        }
+        val locales = if (coverage != null) coverage.locales else if (arscBytes != null) {
             detectLocalesFromArsc(arscBytes)
         } else {
             detectLocalesFromEntries(entries)
@@ -74,7 +86,9 @@ class ApkAnalyzer(private val context: Context) {
             launcherActivity = manifestInfo.second,
             locales = locales,
             dexCount = dexCount,
-            isFlutter = isFlutter
+            isFlutter = isFlutter,
+            languageCoverage = coverage?.coverage.orEmpty(),
+            coverageBasis = coverage?.basis ?: "无法判断翻译覆盖率，请手动选择"
         )
     }
 

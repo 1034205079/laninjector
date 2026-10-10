@@ -24,6 +24,7 @@ public class FloatingBallView extends View {
     private final RectF rect;
     private final Path arrowPath;
     private OnClickCallback clickCallback;
+    private OnClickCallback previousCallback;
 
     private String displayText = "Start";
     private int ballColor = 0xFF6200EE;
@@ -67,6 +68,10 @@ public class FloatingBallView extends View {
 
     public void setClickCallback(OnClickCallback callback) {
         this.clickCallback = callback;
+    }
+
+    public void setPreviousCallback(OnClickCallback callback) {
+        this.previousCallback = callback;
     }
 
     public void setDragListener(OnDragListener listener) {
@@ -127,9 +132,9 @@ public class FloatingBallView extends View {
             canvas.drawText(displayText, w / 2f, textY, textPaint);
 
             // Bottom: big right arrow →
-            float arrowCX = w / 2f;
+            float arrowCX = w * .73f;
             float arrowCY = (splitY + h - pad) / 2f;
-            float arrowW = w * 0.38f;
+            float arrowW = w * 0.28f;
             float arrowH = (h - splitY) * 0.5f;
 
             float shaftH = arrowH * 0.22f;
@@ -153,6 +158,11 @@ public class FloatingBallView extends View {
             arrowPath.close();
 
             canvas.drawPath(arrowPath, arrowPaint);
+            canvas.save();
+            canvas.translate(w, 0);
+            canvas.scale(-1, 1);
+            canvas.drawPath(arrowPath, arrowPaint);
+            canvas.restore();
         } else {
             // Centered text only (Start, Close, Stop)
             float textSize = Math.min(w * 0.22f, h * 0.4f);
@@ -194,10 +204,15 @@ public class FloatingBallView extends View {
 
             case MotionEvent.ACTION_UP:
                 if (!isDragging && (System.currentTimeMillis() - touchStartTime) < CLICK_TIME_THRESHOLD) {
-                    if (clickCallback != null) {
+                    if (showArrow && event.getX() < getWidth() / 2f && previousCallback != null) {
+                        previousCallback.onClick();
+                    } else if (clickCallback != null) {
                         clickCallback.onClick();
                     }
                 }
+                return true;
+            case MotionEvent.ACTION_CANCEL:
+                isDragging = false;
                 return true;
         }
         return super.onTouchEvent(event);

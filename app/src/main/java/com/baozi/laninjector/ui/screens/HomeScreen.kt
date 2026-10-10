@@ -36,12 +36,13 @@ fun HomeScreen(
     apkInfo: ApkInfo?,
     signingConfig: SigningConfig,
     onApkSelected: (Uri) -> Unit,
-    onInjectClick: () -> Unit,
+    onInjectClick: (Set<String>?) -> Unit,
     onSigningConfigChanged: (SigningConfig) -> Unit,
     onKeystoreSelected: (Uri, String) -> Unit,  // uri, entryId
     pendingKeystorePath: String? = null
 ) {
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
+    var chosenLocales by remember(apkInfo) { mutableStateOf(apkInfo?.languageCoverage?.filter { it.recommended }?.map { it.locale }?.toSet().orEmpty()) }
     // Track which entry is being edited (for keystore file picker)
     var editingEntryId by remember { mutableStateOf<String?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
@@ -168,7 +169,7 @@ fun HomeScreen(
             if (apkInfo != null) {
                 Button(
                     onClick = {
-                        onInjectClick()
+                        onInjectClick(if (apkInfo.languageCoverage.isEmpty()) null else chosenLocales)
                     },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = apkInfo.locales.isNotEmpty(),
@@ -201,6 +202,32 @@ fun HomeScreen(
                         InfoRow("Launcher", apkInfo.launcherActivity.substringAfterLast('.'))
                         InfoRow("DEX Files", apkInfo.dexCount.toString())
                         InfoRow("Languages", "${apkInfo.locales.size} found")
+                        if (apkInfo.languageCoverage.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("自动语言推荐（覆盖率估算）", fontWeight = FontWeight.SemiBold)
+                            Text("默认勾选 ${apkInfo.languageCoverage.count { it.recommended }} / ${apkInfo.locales.size} 种语言 · 当前勾选 ${chosenLocales.size} 种",
+                                style = MaterialTheme.typography.bodySmall)
+                            Text(apkInfo.coverageBasis, style = MaterialTheme.typography.bodySmall)
+                            Text("默认推荐 ≥80%；不包含动态代码、服务端或 WebView 正文，可手动调整。",
+                                style = MaterialTheme.typography.bodySmall)
+                            Column(Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState())) {
+                                apkInfo.languageCoverage.sortedWith(compareByDescending<com.baozi.laninjector.model.LanguageCoverage> { it.recommended }.thenByDescending { it.percent }.thenBy { it.locale }).forEach { score ->
+                                    Row(Modifier.fillMaxWidth().clickable {
+                                        chosenLocales = if (score.locale in chosenLocales) chosenLocales - score.locale else chosenLocales + score.locale
+                                    }, verticalAlignment = Alignment.CenterVertically) {
+                                        Checkbox(checked = score.locale in chosenLocales, onCheckedChange = { checked ->
+                                            chosenLocales = if (checked) chosenLocales + score.locale else chosenLocales - score.locale
+                                        })
+                                        Text("${score.locale}  ${score.percent}% (${score.translated}/${score.total})" +
+                                            if (score.recommended) " · 推荐" else if (score.directTranslated == 0 && score.translated > 0) " · 继承通用语言" else " · 需确认",
+                                            style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                            }
+                            TextButton(onClick = { chosenLocales = apkInfo.languageCoverage.filter { it.recommended }.map { it.locale }.toSet() }) {
+                                Text("恢复自动推荐")
+                            }
+                        }
                         if (apkInfo.locales.isNotEmpty()) {
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(

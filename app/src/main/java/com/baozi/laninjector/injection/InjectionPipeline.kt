@@ -33,7 +33,7 @@ class InjectionPipeline(private val context: Context) {
     var lastApkInfo: ApkInfo? = null
         private set
 
-    suspend fun inject(apkUri: Uri, signingConfig: SigningConfig = SigningConfig()): String = withContext(Dispatchers.IO) {
+    suspend fun inject(apkUri: Uri, signingConfig: SigningConfig = SigningConfig(), initialLocales: Set<String>? = null): String = withContext(Dispatchers.IO) {
         val tempDir = File(context.cacheDir, "apk_temp")
         tempDir.mkdirs()
         val tempApk = File(tempDir, "original.apk")
@@ -99,7 +99,21 @@ class InjectionPipeline(private val context: Context) {
 
             // Generate locales asset file
             val localesFileContent = apkInfo.locales.joinToString("\n").toByteArray(Charsets.UTF_8)
-            val additionalAssets = mapOf("laninjector_locales.txt" to localesFileContent)
+            val coverage = org.json.JSONObject().apply {
+                put("version", 1)
+                put("basis", apkInfo.coverageBasis)
+                put("threshold", 80)
+                put("defaults", org.json.JSONArray((initialLocales ?: apkInfo.languageCoverage.filter { it.recommended }.map { it.locale }.toSet()).filter { it in apkInfo.locales }.sorted()))
+                put("languages", org.json.JSONArray().apply {
+                    apkInfo.languageCoverage.forEach { score -> put(org.json.JSONObject().apply {
+                        put("locale", score.locale); put("translated", score.translated); put("total", score.total)
+                        put("percent", score.percent); put("recommended", score.recommended)
+                        put("directTranslated", score.directTranslated)
+                    }) }
+                })
+            }
+            val additionalAssets = mapOf("laninjector_locales.txt" to localesFileContent,
+                "laninjector_language_coverage.json" to coverage.toString().toByteArray(Charsets.UTF_8))
 
             rebuilder.rebuild(
                 originalApkFile = tempApk,
